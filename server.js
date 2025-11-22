@@ -127,6 +127,7 @@ const getTransactions = async (token, accountId, fromDate, toDate) => {
   return (data?.data?.transactions || []).map(t => ({ ...t, accountId }));
 };
 
+// Map Investec Data to Actual Budget Format
 const transformTransaction = (t) => {
   let amount = t.amount * 100; 
   if (t.type === 'DEBIT') {
@@ -137,13 +138,26 @@ const transformTransaction = (t) => {
   
   const date = t.postingDate || t.transactionDate;
   
+  // Build rich notes for context
+  const notesParts = [];
+  if (t.transactionType) notesParts.push(`Type: ${t.transactionType}`);
+  if (t.cardNumber) notesParts.push(`Ref: ${t.cardNumber}`);
+  if (t.runningBalance !== undefined) notesParts.push(`Bal: ${t.runningBalance}`);
+  const notes = notesParts.join(' | ');
+
+  // Construct a robust unique ID
+  // We include a sanitized description to distinguish between multiple identical amount transactions on same day
+  // if postedOrder is 0 or unreliable.
+  const safeDesc = (t.description || '').replace(/[^a-z0-9]/gi, '').substring(0, 30);
+  const importId = `${t.accountId}:${t.postedOrder ?? 0}:${date}:${Math.abs(amount)}:${safeDesc}`;
+
   return {
     date: date,
     amount: Math.round(amount), 
     payee_name: t.description,
     imported_payee: t.description,
-    notes: `Type: ${t.transactionType} | Ref: ${t.cardNumber || 'N/A'}`,
-    imported_id: `${t.accountId}:${t.postedOrder || 0}:${date}:${Math.abs(amount)}`, 
+    notes: notes,
+    imported_id: importId, 
     cleared: true,
   };
 };
@@ -212,6 +226,8 @@ const runSync = async () => {
     
     // 3. Process Each Account
     let totalImported = 0;
+    let totalAdded = 0;
+
     for (const invAcc of investecAccounts) {
       const invName = invAcc.accountName;
       const invId = invAcc.accountId;
@@ -234,9 +250,26 @@ const runSync = async () => {
         const actualTxs = rawTxs.map(transformTransaction);
 
         if (actualTxs.length > 0) {
-          await actual.importTransactions(matchedActualAccount.id, actualTxs);
-          addLog(`✅ Imported ${actualTxs.length} txs into "${matchedActualAccount.name}"`, 'success');
+          // Batching ensures we don't overwhelm the API/SQLite with too many inserts at once
+          const BATCH_SIZE = 500;
+          let accountAddedCount = 0;
+          let accountUpdatedCount = 0;
+
+          for (let i = 0; i < actualTxs.length; i += BATCH_SIZE) {
+             const batch = actualTxs.slice(i, i + BATCH_SIZE);
+             // actual.importTransactions returns { added: [], updated: [], errors: [] }
+             const result = await actual.importTransactions(matchedActualAccount.id, batch);
+             
+             const added = result.added ? result.added.length : 0;
+             const updated = result.updated ? result.updated.length : 0;
+             
+             accountAddedCount += added;
+             accountUpdatedCount += updated;
+          }
+          
           totalImported += actualTxs.length;
+          totalAdded += accountAddedCount;
+          addLog(`✅ processed ${actualTxs.length} txs for "${matchedActualAccount.name}" (Added: ${accountAddedCount}, Duplicates: ${accountUpdatedCount})`, 'success');
         } else {
           addLog(`No new transactions for ${invName}`, 'info');
         }
@@ -244,8 +277,15 @@ const runSync = async () => {
         addLog(`Error syncing account ${invName}: ${e.message}`, 'error');
       }
     }
+    
+    // 4. Push changes to Remote Server
+    if (totalImported > 0) {
+       addLog('Syncing changes to Actual Budget server...', 'info');
+       await actual.sync(); 
+       addLog('Server sync complete.', 'success');
+    }
 
-    addLog(`Sync complete. Total transactions: ${totalImported}`, 'success');
+    addLog(`Process complete. New transactions added: ${totalAdded}`, 'success');
 
   } catch (e) {
     addLog(`Sync Failed: ${e.message}`, 'error');
