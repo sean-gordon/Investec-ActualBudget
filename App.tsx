@@ -22,6 +22,7 @@ export default function App() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [serverVersion, setServerVersion] = useState<string>('Unknown');
   const [lastSyncTime, setLastSyncTime] = useState<number | null>(null);
+  const [isBudgetLoaded, setIsBudgetLoaded] = useState(false);
 
   const fetchJson = async (url: string, options?: RequestInit) => {
     try {
@@ -36,7 +37,6 @@ export default function App() {
       }
       throw new Error(`Invalid response type: ${contentType}`);
     } catch (error) {
-      // console.warn(`Fetch failed for ${url}:`, error);
       throw error;
     }
   };
@@ -50,11 +50,12 @@ export default function App() {
     // Poll Status and Logs
     const poll = async () => {
       try {
-        // 1. Get Status (Is it running?)
+        // 1. Get Status
         const statusData = await fetchJson(`${API_BASE}/status`);
         setIsConnected(true);
         setIsProcessing(statusData.isProcessing);
         setServerVersion(statusData.version);
+        setIsBudgetLoaded(statusData.budgetLoaded);
         if (statusData.lastSyncTime) setLastSyncTime(statusData.lastSyncTime);
 
         // 2. Get Logs
@@ -86,12 +87,18 @@ export default function App() {
   };
 
   const triggerSync = async () => {
-    setIsProcessing(true); // Optimistic update
+    if (isProcessing) return;
+    
+    // Optimistic update
+    setIsProcessing(true);
+    
     try {
       await fetchJson(`${API_BASE}/sync`, { method: 'POST' });
+      // Don't set isProcessing to false here; wait for the poll to confirm it started or finished
     } catch (e) {
-      console.error(e);
+      console.error("Failed to trigger sync:", e);
       setIsProcessing(false);
+      alert("Failed to start sync. Check server connection.");
     }
   };
 
@@ -170,6 +177,12 @@ export default function App() {
                       <Clock size={16} className="text-slate-500" />
                       <span className="text-sm text-slate-400">
                         Last Sync: <span className="text-slate-200">{lastSyncTime ? new Date(lastSyncTime).toLocaleTimeString() : 'Never'}</span>
+                      </span>
+                   </div>
+                   <div className="flex items-center gap-3 mb-3">
+                      <div className={`w-3 h-3 rounded-full ${isBudgetLoaded ? 'bg-indigo-500' : 'bg-slate-600'}`}></div>
+                      <span className="text-sm text-slate-400">
+                        Budget Loaded: <span className="text-slate-200">{isBudgetLoaded ? 'Yes' : 'No'}</span>
                       </span>
                    </div>
                    <div className="text-xs text-slate-500 border-t border-slate-800 pt-3">
