@@ -1,0 +1,200 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import { Activity, Settings, Play, CreditCard, ExternalLink, Wifi } from 'lucide-react';
+import { AppConfig, LogEntry } from './types';
+import { SettingsForm } from './components/SettingsForm';
+import { LogConsole } from './components/LogConsole';
+
+const API_BASE = '/api';
+
+export default function App() {
+  const [view, setView] = useState<'dashboard' | 'settings'>('dashboard');
+  const [config, setConfig] = useState<AppConfig>({
+    investecClientId: '',
+    investecSecretId: '',
+    investecApiKey: '',
+    actualServerUrl: '',
+    actualBudgetId: '',
+    actualPassword: '',
+    syncSchedule: ''
+  });
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [isConnected, setIsConnected] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  // Helper to handle API responses safely
+  const fetchJson = async (url: string, options?: RequestInit) => {
+    try {
+      const res = await fetch(url, options);
+      
+      if (!res.ok) {
+        const text = await res.text().catch(() => 'No error details');
+        throw new Error(`API Error ${res.status}: ${text.substring(0, 100)}`);
+      }
+
+      const contentType = res.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        return await res.json();
+      }
+      
+      // Fallback for non-JSON 200 OK (rare but possible if redirects happen)
+      throw new Error(`Invalid response type: ${contentType}`);
+    } catch (error) {
+      console.warn(`Fetch failed for ${url}:`, error);
+      throw error;
+    }
+  };
+
+  // Fetch Config on load
+  useEffect(() => {
+    fetchJson(`${API_BASE}/config`)
+      .then(data => {
+        setConfig(data);
+        setIsConnected(true);
+      })
+      .catch(err => {
+        console.error("Backend unreachable:", err);
+        setIsConnected(false);
+      });
+  }, []);
+
+  // Poll Logs
+  useEffect(() => {
+    const poll = () => {
+      fetchJson(`${API_BASE}/logs`)
+        .then(data => {
+            setLogs(data);
+            setIsConnected(true);
+            const lastLog = data[data.length - 1];
+            if (lastLog && lastLog.message.includes('Starting')) setIsProcessing(true);
+            if (lastLog && (lastLog.message.includes('Successfully') || lastLog.message.includes('Failed') || lastLog.message.includes('Skipping'))) setIsProcessing(false);
+        })
+        .catch(() => setIsConnected(false));
+    };
+
+    // Initial poll
+    poll();
+    const interval = setInterval(poll, 2000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleSaveSettings = async (newConfig: AppConfig) => {
+    try {
+      await fetchJson(`${API_BASE}/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newConfig)
+      });
+      setConfig(newConfig);
+      setView('dashboard');
+    } catch (e) {
+      alert("Failed to save settings. Check console.");
+    }
+  };
+
+  const triggerSync = async () => {
+    setIsProcessing(true);
+    try {
+      await fetchJson(`${API_BASE}/sync`, { method: 'POST' });
+    } catch (e) {
+      console.error(e);
+      setIsProcessing(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col h-full bg-slate-950 text-slate-200">
+      {/* Header */}
+      <header className="flex items-center justify-between px-8 py-6 border-b border-slate-800 bg-slate-950/50 backdrop-blur-sm sticky top-0 z-10">
+        <div className="flex items-center gap-3">
+          <div className="bg-investec-900 p-2 rounded-lg border border-slate-700">
+            <Activity className="text-investec-500" size={24} />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold text-white tracking-tight">Investec <span className="text-slate-500 mx-1">/</span> Actual Sync</h1>
+            <div className="flex items-center gap-2">
+                <p className="text-xs text-slate-500">Daemon Controller</p>
+                <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></span>
+            </div>
+          </div>
+        </div>
+        <button
+          onClick={() => setView(view === 'dashboard' ? 'settings' : 'dashboard')}
+          className={`p-2 rounded-full hover:bg-slate-800 transition-colors ${view === 'settings' ? 'bg-slate-800 text-white' : 'text-slate-400'}`}
+        >
+          <Settings size={20} />
+        </button>
+      </header>
+
+      {/* Content */}
+      <main className="flex-1 overflow-y-auto p-8">
+        <div className="max-w-5xl mx-auto">
+          
+          {view === 'settings' ? (
+            <SettingsForm config={config} onSave={handleSaveSettings} />
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              
+              {/* Left Col: Controls */}
+              <div className="lg:col-span-1 space-y-6">
+                <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-lg">
+                  <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+                    <CreditCard size={18} className="text-investec-500" />
+                    Manual Control
+                  </h2>
+                  
+                  <p className="text-sm text-slate-400 mb-6 leading-relaxed">
+                    Trigger the synchronization process manually. Automated sync runs according to the schedule defined in settings.
+                  </p>
+
+                  <button
+                    onClick={triggerSync}
+                    disabled={isProcessing || !isConnected}
+                    className={`w-full flex items-center justify-center gap-2 py-3 rounded-lg font-bold transition-all ${
+                      isProcessing || !isConnected
+                        ? 'bg-slate-800 text-slate-500 cursor-not-allowed' 
+                        : 'bg-investec-500 hover:bg-yellow-400 text-black shadow-lg shadow-yellow-900/20'
+                    }`}
+                  >
+                    {isProcessing ? (
+                      <div className="animate-spin h-5 w-5 border-2 border-slate-500 border-t-transparent rounded-full" />
+                    ) : (
+                      <Play size={20} fill="currentColor" />
+                    )}
+                    <span>{isProcessing ? 'Syncing...' : 'Start Sync Now'}</span>
+                  </button>
+                </div>
+
+                <div className="bg-slate-900 p-6 rounded-xl border border-slate-800">
+                   <h3 className="text-sm font-semibold text-slate-300 mb-2">Daemon Status</h3>
+                   <div className="flex items-center gap-3 mb-3">
+                      <Wifi size={16} className={isConnected ? "text-green-500" : "text-red-500"} />
+                      <span className="text-sm text-slate-400">
+                        {isConnected ? 'Connected to Backend' : 'Disconnected'}
+                      </span>
+                   </div>
+                   <div className="text-xs text-slate-500 border-t border-slate-800 pt-3">
+                      Current Schedule: <span className="font-mono text-slate-300">{config.syncSchedule || 'Disabled'}</span>
+                   </div>
+                </div>
+              </div>
+
+              {/* Right Col: Logs & Output */}
+              <div className="lg:col-span-2 flex flex-col gap-6">
+                <div>
+                  <h2 className="text-lg font-semibold text-white mb-4">Server Logs</h2>
+                  <LogConsole logs={logs} />
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </main>
+      
+      <footer className="p-4 text-center text-xs text-slate-600">
+        <a href="https://actualbudget.com" target="_blank" rel="noreferrer" className="hover:text-slate-400 inline-flex items-center gap-1">
+          Powered by Actual Budget <ExternalLink size={10} />
+        </a>
+      </footer>
+    </div>
+  );
+}

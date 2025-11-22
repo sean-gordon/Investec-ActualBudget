@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+  investec-sync:
+    build: .
+    ports:
+      - "46490:46490"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - NODE_ENV=production
