@@ -20,7 +20,7 @@ const ACTUAL_DATA_DIR = path.join(DATA_DIR, 'actual-data');
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
 // VERSION TRACKING
-const SCRIPT_VERSION = "2.11.0 - Root Perms & Fixes";
+const SCRIPT_VERSION = "2.12.0 - Aggressive Reset";
 
 // --- Global Error Handlers ---
 process.on('uncaughtException', (err) => {
@@ -64,7 +64,11 @@ const addLog = (message, type = 'info') => {
 const ensureDataDir = () => {
   try {
     if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-    if (!fs.existsSync(ACTUAL_DATA_DIR)) fs.mkdirSync(ACTUAL_DATA_DIR, { recursive: true });
+    
+    // Ensure Actual Data Dir exists and is writable
+    if (!fs.existsSync(ACTUAL_DATA_DIR)) {
+        fs.mkdirSync(ACTUAL_DATA_DIR, { recursive: true });
+    }
     
     // Permission Test
     const testFile = path.join(ACTUAL_DATA_DIR, 'perm-test');
@@ -129,12 +133,36 @@ const getActualServerInfo = async (serverUrl) => {
   }
 };
 
-const initActualApi = async () => {
+const resetActualState = async () => {
+  addLog('Performing HARD RESET of Actual API state...', 'info');
+  try { await actual.shutdown(); } catch(e) {}
+  isActualInitialized = false;
+  loadedBudgetId = null;
+  
+  // NUCLEAR OPTION: Completely wipe the data directory to remove corrupt state/locks
+  try {
+    if (fs.existsSync(ACTUAL_DATA_DIR)) {
+      fs.rmSync(ACTUAL_DATA_DIR, { recursive: true, force: true });
+    }
+    fs.mkdirSync(ACTUAL_DATA_DIR, { recursive: true });
+    addLog('Local data cache wiped clean.', 'success');
+  } catch (e) {
+    console.error("Failed to clean data dir:", e);
+    addLog(`Warning: Failed to clean cache: ${e.message}`, 'error');
+  }
+};
+
+const initActualApi = async (serverUrl) => {
   ensureDataDir();
   if (isActualInitialized) return;
   
   addLog('Initializing Actual API Engine...', 'info');
   try {
+    // Pre-seed the server URL to prevent "localhost" defaults
+    if (serverUrl) {
+        fs.writeFileSync(path.join(ACTUAL_DATA_DIR, 'server-url'), serverUrl);
+    }
+    
     await actual.init({ dataDir: ACTUAL_DATA_DIR });
     isActualInitialized = true;
   } catch (e) {
@@ -142,36 +170,6 @@ const initActualApi = async () => {
     try { await actual.shutdown(); } catch(err) {}
     isActualInitialized = false;
     throw e;
-  }
-};
-
-const resetActualState = async (specificBudgetId) => {
-  addLog('Resetting Actual API state and cleaning local data...', 'info');
-  try { await actual.shutdown(); } catch(e) {}
-  isActualInitialized = false;
-  loadedBudgetId = null;
-  
-  // Aggressively clean up data directory to remove corrupt lockfiles or dbs
-  try {
-    // If we know the specific budget ID, try to remove just that folder first
-    if (specificBudgetId) {
-       const budgetDir = path.join(ACTUAL_DATA_DIR, specificBudgetId);
-       if (fs.existsSync(budgetDir)) {
-         fs.rmSync(budgetDir, { recursive: true, force: true });
-         addLog(`Cleared specific budget cache: ${specificBudgetId}`, 'info');
-       }
-    }
-    
-    // Also clean generic files
-    const files = fs.readdirSync(ACTUAL_DATA_DIR);
-    for (const file of files) {
-      if (file.includes('meta') || file.includes('identifier')) {
-         fs.unlinkSync(path.join(ACTUAL_DATA_DIR, file));
-      }
-    }
-  } catch (e) {
-    console.error("Failed to clean data dir:", e);
-    addLog(`Warning: Failed to clean cache: ${e.message}`, 'error');
   }
 };
 
@@ -260,7 +258,7 @@ const runSync = async () => {
 
   isProcessing = true;
   addLog(`Starting sync process...`, 'info');
-  addLog(`Running as User UID: ${process.getuid ? process.getuid() : 'unknown'}`, 'info');
+  addLog(`Config: URL=${config.actualServerUrl} | ID=${config.actualBudgetId.substring(0,4)}...`, 'info');
 
   try {
     // --- 0. Diagnostic Check ---
@@ -273,15 +271,12 @@ const runSync = async () => {
 
     // --- 1. Setup Actual Budget ---
     try {
-      // Always shutdown before starting a manual sync to ensure clean slate
-      if (isActualInitialized) {
-        await actual.shutdown();
-        isActualInitialized = false;
-      }
+      // Force reset every single time to prevent "Could not get remote files" due to stale locks
+      await resetActualState();
 
-      await initActualApi();
+      await initActualApi(config.actualServerUrl);
 
-      // Check budget ID format (simple whitespace check)
+      // Check budget ID format
       if (config.actualBudgetId !== config.actualBudgetId.trim()) {
          throw new Error("Budget ID contains hidden spaces. Please re-enter it in Settings.");
       }
@@ -301,13 +296,12 @@ const runSync = async () => {
       console.error("Actual API Error Detail:", e);
       
       if (e.message.includes('Could not get remote files')) {
-        addLog('⚠️ CRITICAL FAILURE: The server refused the download.', 'error');
-        addLog('1. Verify Sync ID matches the URL bar in Actual exactly.', 'error');
-        addLog('2. If using Docker, ensure /app/data is writable (UID matches).', 'error');
-        addLog('3. Try deleting the data folder content manually if corrupt.', 'error');
+        addLog('⚠️ CRITICAL FAILURE: Server rejected the download request.', 'error');
+        addLog('1. Verify Sync ID in Actual (Settings > Advanced > Sync ID).', 'error');
+        addLog('2. Verify Password (if set).', 'error');
+        addLog('3. Docker: Ensure host.docker.internal is working.', 'error');
       }
 
-      await resetActualState(config.actualBudgetId);
       throw new Error("Failed to connect/sync with Actual Budget.");
     }
 
@@ -386,6 +380,8 @@ const runSync = async () => {
     addLog(`❌ Sync Aborted: ${e.message}`, 'error');
   } finally {
     isProcessing = false;
+    // Always clean up after a run in this aggressive mode
+    try { await actual.shutdown(); } catch(e) {}
   }
 };
 
