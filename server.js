@@ -71,8 +71,17 @@ const loadConfig = () => {
 
 const saveConfig = (newConfig) => {
   ensureDataDir();
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify(newConfig, null, 2));
-  setupCron(newConfig.syncSchedule);
+  
+  // Sanitize: Trim whitespace from strings to prevent copy-paste errors
+  const sanitizedConfig = { ...newConfig };
+  Object.keys(sanitizedConfig).forEach(key => {
+    if (typeof sanitizedConfig[key] === 'string') {
+      sanitizedConfig[key] = sanitizedConfig[key].trim();
+    }
+  });
+
+  fs.writeFileSync(CONFIG_FILE, JSON.stringify(sanitizedConfig, null, 2));
+  setupCron(sanitizedConfig.syncSchedule);
 };
 
 // --- Logic ---
@@ -90,7 +99,10 @@ const getInvestecToken = async (clientId, secretId, apiKey) => {
     body: new URLSearchParams({ 'grant_type': 'client_credentials' }),
   });
 
-  if (!response.ok) throw new Error(`Auth failed: ${await response.text()}`);
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Auth failed (${response.status}): ${text}`);
+  }
   const data = await response.json();
   return data.access_token;
 };
@@ -102,7 +114,7 @@ const getInvestecAccounts = async (token) => {
   if (!response.ok) throw new Error(`Get Accounts failed: ${await response.text()}`);
   const data = await response.json();
   if (!data?.data?.accounts) throw new Error("Invalid account data received");
-  return data.data.accounts; // Return full account objects, not just IDs
+  return data.data.accounts; 
 };
 
 const getTransactions = async (token, accountId, fromDate, toDate) => {
@@ -123,7 +135,6 @@ const transformTransaction = (t) => {
     amount = Math.abs(amount);
   }
   
-  // Format date as YYYY-MM-DD
   const date = t.postingDate || t.transactionDate;
   
   return {
@@ -144,17 +155,29 @@ const runSync = async () => {
   }
   
   const config = loadConfig();
-  if (!config.investecClientId || !config.investecApiKey) {
-    addLog('Sync skipped: Missing Investec credentials.', 'error');
-    return;
-  }
-  if (!config.actualServerUrl || !config.actualBudgetId) {
-    addLog('Sync skipped: Missing Actual Budget credentials.', 'error');
+  
+  // Detailed validation
+  const missingInvestec = [];
+  if (!config.investecClientId) missingInvestec.push('Client ID');
+  if (!config.investecSecretId) missingInvestec.push('Secret ID');
+  if (!config.investecApiKey) missingInvestec.push('API Key');
+  
+  if (missingInvestec.length > 0) {
+    addLog(`Sync skipped: Missing Investec credentials: ${missingInvestec.join(', ')}`, 'error');
     return;
   }
 
+  const missingActual = [];
+  if (!config.actualServerUrl) missingActual.push('Server URL');
+  if (!config.actualBudgetId) missingActual.push('Budget ID');
+
+  if (missingActual.length > 0) {
+     addLog(`Sync skipped: Missing Actual Budget settings: ${missingActual.join(', ')}`, 'error');
+     return;
+  }
+
   isProcessing = true;
-  addLog('Starting scheduled sync...', 'info');
+  addLog('Starting sync process...', 'info');
 
   try {
     // 1. Get Investec Data
@@ -173,10 +196,8 @@ const runSync = async () => {
     // 2. Connect to Actual Budget
     addLog(`Connecting to Actual Budget at ${config.actualServerUrl}...`, 'info');
     
-    // Initialize Actual API
     await actual.init({ dataDir: ACTUAL_DATA_DIR });
     
-    // Download Budget
     try {
       await actual.downloadBudget(config.actualBudgetId, {
         password: config.actualPassword,
@@ -187,25 +208,24 @@ const runSync = async () => {
        throw new Error(`Failed to download budget: ${e.message}. Check URL (use IP not localhost) and Password.`);
     }
 
-    // Get Actual Accounts for matching
     const actualAccounts = await actual.getAccounts();
     
     // 3. Process Each Account
+    let totalImported = 0;
     for (const invAcc of investecAccounts) {
       const invName = invAcc.accountName;
       const invId = invAcc.accountId;
 
       addLog(`Processing: ${invName}...`, 'info');
       
-      // Try to find matching Actual account by Name
       const matchedActualAccount = actualAccounts.find(a => 
         a.name.toLowerCase() === invName.toLowerCase() || 
         a.name.toLowerCase().includes(invName.toLowerCase())
       );
 
       if (!matchedActualAccount) {
-        addLog(`❌ No Actual account found matching "${invName}". Skipping.`, 'error');
-        addLog(`Available Actual accounts: ${actualAccounts.map(a => a.name).join(', ')}`, 'info');
+        addLog(`❌ No Actual account found matching "${invName}".`, 'error');
+        addLog(`-> Rename an Actual account to contain "${invName}" to fix.`, 'info');
         continue;
       }
 
@@ -214,18 +234,18 @@ const runSync = async () => {
         const actualTxs = rawTxs.map(transformTransaction);
 
         if (actualTxs.length > 0) {
-          addLog(`Importing ${actualTxs.length} transactions into "${matchedActualAccount.name}"...`, 'info');
           await actual.importTransactions(matchedActualAccount.id, actualTxs);
-          addLog(`✅ Imported transactions for ${invName}`, 'success');
+          addLog(`✅ Imported ${actualTxs.length} txs into "${matchedActualAccount.name}"`, 'success');
+          totalImported += actualTxs.length;
         } else {
-          addLog(`No transactions found for ${invName}`, 'info');
+          addLog(`No new transactions for ${invName}`, 'info');
         }
       } catch (e) {
         addLog(`Error syncing account ${invName}: ${e.message}`, 'error');
       }
     }
 
-    addLog('Sync complete.', 'success');
+    addLog(`Sync complete. Total transactions: ${totalImported}`, 'success');
 
   } catch (e) {
     addLog(`Sync Failed: ${e.message}`, 'error');
@@ -295,10 +315,9 @@ app.get('/api/logs', (req, res) => {
 });
 
 // --- Static Files ---
-// Serve static files strictly from dist
 app.use(express.static(path.join(__dirname, 'dist')));
 
-// SPA Fallback - Must be the last route
+// SPA Fallback
 app.get('*', (req, res) => {
   const indexPath = path.join(__dirname, 'dist', 'index.html');
   if (fs.existsSync(indexPath)) {

@@ -1,7 +1,7 @@
 {
   "name": "investec-actual-sync",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,7 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@actual-app/api": "^6.1.0",
+    "@actual-app/api": "^24.0.0",
     "body-parser": "^1.20.2",
     "cors": "^2.8.5",
     "express": "^4.19.2",
