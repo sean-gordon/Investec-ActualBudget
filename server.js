@@ -17,7 +17,15 @@ const CONFIG_FILE = path.join(DATA_DIR, 'settings.json');
 const ACTUAL_DATA_DIR = path.join(DATA_DIR, 'actual-data');
 
 // VERSION TRACKING
-const SCRIPT_VERSION = "2.3.0 - Debug Mode";
+const SCRIPT_VERSION = "2.5.0 - Stability Fix";
+
+// --- Global Error Handlers (Prevent silent crashes) ---
+process.on('uncaughtException', (err) => {
+  console.error('CRITICAL: Uncaught Exception:', err);
+});
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('CRITICAL: Unhandled Rejection at:', promise, 'reason:', reason);
+});
 
 // --- Middleware ---
 app.use(cors());
@@ -34,6 +42,9 @@ let currentTask = null;
 let isProcessing = false;
 let logs = [];
 const MAX_LOGS = 100;
+
+// Singleton State for Actual API
+let isActualInitialized = false;
 
 const addLog = (message, type = 'info') => {
   const entry = { timestamp: Date.now(), message, type };
@@ -81,15 +92,32 @@ const saveConfig = (newConfig) => {
       sanitizedConfig[key] = sanitizedConfig[key].trim();
     }
   });
+  
   // Remove trailing slash from URL if present
-  if (sanitizedConfig.actualServerUrl && sanitizedConfig.actualServerUrl.endsWith('/')) {
-    sanitizedConfig.actualServerUrl = sanitizedConfig.actualServerUrl.slice(0, -1);
+  if (sanitizedConfig.actualServerUrl) {
+    sanitizedConfig.actualServerUrl = sanitizedConfig.actualServerUrl.replace(/\/+$/, "");
   }
+
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(sanitizedConfig, null, 2));
   setupCron(sanitizedConfig.syncSchedule);
 };
 
 // --- Logic ---
+
+const initActualApi = async () => {
+  if (isActualInitialized) return;
+  
+  addLog('Initializing Actual API Engine...', 'info');
+  try {
+    await actual.init({ dataDir: ACTUAL_DATA_DIR });
+    isActualInitialized = true;
+    addLog('Actual API Engine Initialized.', 'success');
+  } catch (e) {
+    addLog(`Failed to init Actual API: ${e.message}`, 'error');
+    throw e;
+  }
+};
+
 const getInvestecToken = async (clientId, secretId, apiKey) => {
   const authString = `${clientId}:${secretId}`;
   const base64Auth = Buffer.from(authString).toString('base64');
@@ -175,7 +203,10 @@ const runSync = async () => {
   addLog(`Starting sync process (Server v${SCRIPT_VERSION})`, 'info');
 
   try {
-    // 1. Investec
+    // 1. Init Actual (Singleton)
+    await initActualApi();
+
+    // 2. Investec Auth
     addLog('Authenticating with Investec...', 'info');
     const token = await getInvestecToken(config.investecClientId, config.investecSecretId, config.investecApiKey);
     addLog('Investec Authenticated.', 'success');
@@ -189,24 +220,19 @@ const runSync = async () => {
     const fromStr = startDate.toISOString().split('T')[0];
     const toStr = endDate.toISOString().split('T')[0];
 
-    // 2. Actual Budget Init
-    addLog(`Initializing Actual API (Target: ${config.actualServerUrl})...`, 'info');
-    await actual.init({ dataDir: ACTUAL_DATA_DIR });
-
-    // 3. Actual Budget Download
+    // 3. Actual Budget Connect
     addLog(`Downloading Budget ID: ${config.actualBudgetId}...`, 'info');
     try {
       await actual.downloadBudget(config.actualBudgetId, {
         password: config.actualPassword,
         serverURL: config.actualServerUrl
       });
-      addLog('Budget downloaded/cached successfully.', 'success');
+      addLog('Budget connected.', 'success');
     } catch (e) {
-      throw new Error(`Actual Budget Download Failed: ${e.message}. Ensure Server URL is reachable from Docker.`);
+      throw new Error(`Actual Budget Connect Failed: ${e.message}`);
     }
 
     const actualAccounts = await actual.getAccounts();
-    
     let totalImported = 0;
 
     // 4. Loop Accounts
@@ -214,7 +240,6 @@ const runSync = async () => {
       const invName = invAcc.accountName;
       const invId = invAcc.accountId;
 
-      // Match Account
       const matchedActualAccount = actualAccounts.find(a => 
         a.name.toLowerCase() === invName.toLowerCase() || 
         a.name.toLowerCase().includes(invName.toLowerCase())
@@ -228,23 +253,21 @@ const runSync = async () => {
       try {
         const rawTxs = await getTransactions(token, invId, fromStr, toStr);
         const actualTxs = rawTxs.map(transformTransaction);
-        addLog(`Account "${invName}": Found ${actualTxs.length} transactions to process.`, 'info');
-
+        addLog(`Account "${invName}": Found ${actualTxs.length} transactions.`, 'info');
+        
         if (actualTxs.length > 0) {
           const BATCH_SIZE = 500;
+          let batchCount = 0;
           for (let i = 0; i < actualTxs.length; i += BATCH_SIZE) {
              const batch = actualTxs.slice(i, i + BATCH_SIZE);
              const result = await actual.importTransactions(matchedActualAccount.id, batch);
              
-             // Result handling for verbose logging
              const added = result?.added?.length || 0;
              const updated = result?.updated?.length || 0;
              totalImported += added;
-             
-             if (added > 0 || updated > 0) {
-               addLog(`  -> Batch imported: ${added} added, ${updated} updated.`, 'info');
-             }
+             batchCount += added + updated;
           }
+          addLog(`Processed ${batchCount} txs for "${matchedActualAccount.name}" (${totalImported} new)`, 'info');
         }
       } catch (e) {
         addLog(`Error processing ${invName}: ${e.message}`, 'error');
@@ -252,20 +275,19 @@ const runSync = async () => {
     }
 
     // 5. Sync
-    addLog('Pushing changes to Actual Server...', 'info');
-    await actual.sync();
-    addLog(`Sync process complete. Total new transactions: ${totalImported}`, 'success');
+    if (totalImported > 0) {
+      addLog('Pushing changes to Actual Server...', 'info');
+      await actual.sync();
+      addLog(`Sync complete. ${totalImported} new transactions imported.`, 'success');
+    } else {
+      addLog('Sync complete. No new transactions found.', 'success');
+    }
 
   } catch (e) {
     addLog(`CRITICAL SYNC FAILURE: ${e.message}`, 'error');
     console.error(e);
   } finally {
-    try {
-      await actual.shutdown();
-      addLog('Actual API shutdown complete.', 'info');
-    } catch (e) {
-      console.error("Shutdown error:", e);
-    }
+    // We DO NOT shutdown here anymore to keep the singleton connection alive
     isProcessing = false;
   }
 };
@@ -282,14 +304,12 @@ const setupCron = (schedule) => {
 const initialConfig = loadConfig();
 setupCron(initialConfig.syncSchedule);
 
-// Health check includes version to verify docker build status
 app.get('/api/health', (req, res) => res.json({ status: 'ok', version: SCRIPT_VERSION }));
 app.get('/api/config', (req, res) => res.json(loadConfig()));
 app.post('/api/config', (req, res) => { saveConfig(req.body); res.json({ status: 'ok' }); });
 app.post('/api/sync', (req, res) => { runSync(); res.json({ status: 'ok' }); });
 app.get('/api/logs', (req, res) => res.json(logs));
 
-// Static serving
 app.use(express.static(path.join(__dirname, 'dist')));
 app.get('*', (req, res) => {
   const indexPath = path.join(__dirname, 'dist', 'index.html');
