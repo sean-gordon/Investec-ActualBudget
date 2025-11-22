@@ -20,7 +20,7 @@ const ACTUAL_DATA_DIR = path.join(DATA_DIR, 'actual-data');
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
 // VERSION TRACKING
-const SCRIPT_VERSION = "2.12.0 - Aggressive Reset";
+const SCRIPT_VERSION = "2.13.0 - Server URL Fix";
 
 // --- Global Error Handlers ---
 process.on('uncaughtException', (err) => {
@@ -156,14 +156,19 @@ const initActualApi = async (serverUrl) => {
   ensureDataDir();
   if (isActualInitialized) return;
   
-  addLog('Initializing Actual API Engine...', 'info');
+  addLog(`Initializing Actual API Engine with URL: ${serverUrl}`, 'info');
   try {
     // Pre-seed the server URL to prevent "localhost" defaults
     if (serverUrl) {
         fs.writeFileSync(path.join(ACTUAL_DATA_DIR, 'server-url'), serverUrl);
     }
     
-    await actual.init({ dataDir: ACTUAL_DATA_DIR });
+    // CRITICAL FIX: Pass serverURL explicitly to init
+    await actual.init({ 
+      dataDir: ACTUAL_DATA_DIR,
+      serverURL: serverUrl 
+    });
+    
     isActualInitialized = true;
   } catch (e) {
     addLog(`Failed to init Actual API: ${e.message}`, 'error');
@@ -284,8 +289,7 @@ const runSync = async () => {
       addLog(`Downloading Budget: ${config.actualBudgetId}...`, 'info');
       
       await actual.downloadBudget(config.actualBudgetId, {
-        password: config.actualPassword || undefined,
-        serverURL: config.actualServerUrl
+        password: config.actualPassword || undefined
       });
       
       loadedBudgetId = config.actualBudgetId;
