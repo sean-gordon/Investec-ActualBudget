@@ -15,6 +15,7 @@ const PORT = process.env.PORT || 46490;
 const DATA_DIR = path.join(__dirname, 'data');
 const CONFIG_FILE = path.join(DATA_DIR, 'settings.json');
 const ACTUAL_DATA_DIR = path.join(DATA_DIR, 'actual-data');
+const SCRIPT_VERSION = "2.2.0 - Native API";
 
 // --- Middleware ---
 app.use(cors());
@@ -129,7 +130,9 @@ const getTransactions = async (token, accountId, fromDate, toDate) => {
 
 // Map Investec Data to Actual Budget Format
 const transformTransaction = (t) => {
-  let amount = t.amount * 100; 
+  // Actual expects integers. Investec gives floats.
+  let amount = Math.round(t.amount * 100); 
+  
   if (t.type === 'DEBIT') {
     amount = -Math.abs(amount);
   } else {
@@ -146,14 +149,12 @@ const transformTransaction = (t) => {
   const notes = notesParts.join(' | ');
 
   // Construct a robust unique ID
-  // We include a sanitized description to distinguish between multiple identical amount transactions on same day
-  // if postedOrder is 0 or unreliable.
   const safeDesc = (t.description || '').replace(/[^a-z0-9]/gi, '').substring(0, 30);
   const importId = `${t.accountId}:${t.postedOrder ?? 0}:${date}:${Math.abs(amount)}:${safeDesc}`;
 
   return {
     date: date,
-    amount: Math.round(amount), 
+    amount: amount, 
     payee_name: t.description,
     imported_payee: t.description,
     notes: notes,
@@ -191,7 +192,7 @@ const runSync = async () => {
   }
 
   isProcessing = true;
-  addLog('Starting sync process...', 'info');
+  addLog(`Starting sync (v${SCRIPT_VERSION})...`, 'info');
 
   try {
     // 1. Get Investec Data
@@ -210,6 +211,7 @@ const runSync = async () => {
     // 2. Connect to Actual Budget
     addLog(`Connecting to Actual Budget at ${config.actualServerUrl}...`, 'info');
     
+    // Clean init
     await actual.init({ dataDir: ACTUAL_DATA_DIR });
     
     try {
@@ -225,8 +227,8 @@ const runSync = async () => {
     const actualAccounts = await actual.getAccounts();
     
     // 3. Process Each Account
-    let totalImported = 0;
     let totalAdded = 0;
+    let totalUpdated = 0;
 
     for (const invAcc of investecAccounts) {
       const invName = invAcc.accountName;
@@ -250,26 +252,21 @@ const runSync = async () => {
         const actualTxs = rawTxs.map(transformTransaction);
 
         if (actualTxs.length > 0) {
-          // Batching ensures we don't overwhelm the API/SQLite with too many inserts at once
+          // Batching to be safe
           const BATCH_SIZE = 500;
-          let accountAddedCount = 0;
-          let accountUpdatedCount = 0;
 
           for (let i = 0; i < actualTxs.length; i += BATCH_SIZE) {
              const batch = actualTxs.slice(i, i + BATCH_SIZE);
-             // actual.importTransactions returns { added: [], updated: [], errors: [] }
+             
              const result = await actual.importTransactions(matchedActualAccount.id, batch);
              
-             const added = result.added ? result.added.length : 0;
-             const updated = result.updated ? result.updated.length : 0;
+             const added = result?.added?.length || 0;
+             const updated = result?.updated?.length || 0;
              
-             accountAddedCount += added;
-             accountUpdatedCount += updated;
+             totalAdded += added;
+             totalUpdated += updated;
           }
-          
-          totalImported += actualTxs.length;
-          totalAdded += accountAddedCount;
-          addLog(`✅ processed ${actualTxs.length} txs for "${matchedActualAccount.name}" (Added: ${accountAddedCount}, Duplicates: ${accountUpdatedCount})`, 'success');
+          addLog(`Processed ${actualTxs.length} txs for "${matchedActualAccount.name}"`, 'info');
         } else {
           addLog(`No new transactions for ${invName}`, 'info');
         }
@@ -279,13 +276,13 @@ const runSync = async () => {
     }
     
     // 4. Push changes to Remote Server
-    if (totalImported > 0) {
-       addLog('Syncing changes to Actual Budget server...', 'info');
+    if (totalAdded > 0 || totalUpdated > 0) {
+       addLog('Pushing changes to Actual Budget server...', 'info');
        await actual.sync(); 
        addLog('Server sync complete.', 'success');
     }
 
-    addLog(`Process complete. New transactions added: ${totalAdded}`, 'success');
+    addLog(`Sync complete. Added: ${totalAdded}, Duplicates/Updated: ${totalUpdated}`, 'success');
 
   } catch (e) {
     addLog(`Sync Failed: ${e.message}`, 'error');
@@ -369,5 +366,5 @@ app.get('*', (req, res) => {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on http://0.0.0.0:${PORT}`);
-  addLog('System started.', 'success');
+  addLog(`System started (v${SCRIPT_VERSION})`, 'success');
 });
