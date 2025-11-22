@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Activity, Settings, Play, CreditCard, ExternalLink, Wifi } from 'lucide-react';
 import { AppConfig, LogEntry } from './types';
 import { SettingsForm } from './components/SettingsForm';
@@ -20,23 +20,19 @@ export default function App() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [serverVersion, setServerVersion] = useState<string>('Unknown');
 
-  // Helper to handle API responses safely
   const fetchJson = async (url: string, options?: RequestInit) => {
     try {
       const res = await fetch(url, options);
-      
       if (!res.ok) {
         const text = await res.text().catch(() => 'No error details');
         throw new Error(`API Error ${res.status}: ${text.substring(0, 100)}`);
       }
-
       const contentType = res.headers.get('content-type');
       if (contentType && contentType.includes('application/json')) {
         return await res.json();
       }
-      
-      // Fallback for non-JSON 200 OK (rare but possible if redirects happen)
       throw new Error(`Invalid response type: ${contentType}`);
     } catch (error) {
       console.warn(`Fetch failed for ${url}:`, error);
@@ -44,34 +40,32 @@ export default function App() {
     }
   };
 
-  // Fetch Config on load
   useEffect(() => {
-    fetchJson(`${API_BASE}/config`)
+    // Check connection and get version
+    fetchJson(`${API_BASE}/health`)
       .then(data => {
-        setConfig(data);
         setIsConnected(true);
+        if (data.version) setServerVersion(data.version);
       })
-      .catch(err => {
-        console.error("Backend unreachable:", err);
-        setIsConnected(false);
-      });
-  }, []);
+      .catch(() => setIsConnected(false));
 
-  // Poll Logs
-  useEffect(() => {
+    // Load Config
+    fetchJson(`${API_BASE}/config`)
+      .then(data => setConfig(data))
+      .catch(console.error);
+
+    // Poll Logs
     const poll = () => {
       fetchJson(`${API_BASE}/logs`)
         .then(data => {
             setLogs(data);
-            setIsConnected(true);
             const lastLog = data[data.length - 1];
             if (lastLog && lastLog.message.includes('Starting')) setIsProcessing(true);
-            if (lastLog && (lastLog.message.includes('Successfully') || lastLog.message.includes('Failed') || lastLog.message.includes('Skipping'))) setIsProcessing(false);
+            if (lastLog && (lastLog.message.includes('complete') || lastLog.message.includes('FAILURE'))) setIsProcessing(false);
         })
-        .catch(() => setIsConnected(false));
+        .catch(() => {}); // Silent fail on logs
     };
 
-    // Initial poll
     poll();
     const interval = setInterval(poll, 2000);
     return () => clearInterval(interval);
@@ -112,8 +106,8 @@ export default function App() {
           <div>
             <h1 className="text-xl font-bold text-white tracking-tight">Investec <span className="text-slate-500 mx-1">/</span> Actual Sync</h1>
             <div className="flex items-center gap-2">
-                <p className="text-xs text-slate-500">Daemon Controller</p>
                 <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></span>
+                <p className="text-xs text-slate-500">Server v{serverVersion}</p>
             </div>
           </div>
         </div>
@@ -169,11 +163,11 @@ export default function App() {
                    <div className="flex items-center gap-3 mb-3">
                       <Wifi size={16} className={isConnected ? "text-green-500" : "text-red-500"} />
                       <span className="text-sm text-slate-400">
-                        {isConnected ? 'Connected to Backend' : 'Disconnected'}
+                        {isConnected ? 'Connected' : 'Disconnected'}
                       </span>
                    </div>
                    <div className="text-xs text-slate-500 border-t border-slate-800 pt-3">
-                      Current Schedule: <span className="font-mono text-slate-300">{config.syncSchedule || 'Disabled'}</span>
+                      Schedule: <span className="font-mono text-slate-300">{config.syncSchedule || 'Disabled'}</span>
                    </div>
                 </div>
               </div>
