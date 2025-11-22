@@ -6,7 +6,8 @@ WORKDIR /app
 
 # Install dependencies
 COPY package*.json ./
-RUN npm ci
+# Use npm install instead of npm ci to generate lockfile if missing
+RUN npm install
 
 # Copy source code
 COPY . .
@@ -14,7 +15,7 @@ COPY . .
 # Build the frontend (Vite)
 RUN npm run build
 
-# Expose the port
+# Expose the port the app runs on
 EXPOSE 46490
 
 # Start the backend server
