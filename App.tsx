@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Activity, Settings, Play, CreditCard, ExternalLink, Wifi } from 'lucide-react';
+import { Activity, Settings, Play, CreditCard, ExternalLink, Wifi, Clock } from 'lucide-react';
 import { AppConfig, LogEntry } from './types';
 import { SettingsForm } from './components/SettingsForm';
 import { LogConsole } from './components/LogConsole';
@@ -21,6 +21,7 @@ export default function App() {
   const [isConnected, setIsConnected] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [serverVersion, setServerVersion] = useState<string>('Unknown');
+  const [lastSyncTime, setLastSyncTime] = useState<number | null>(null);
 
   const fetchJson = async (url: string, options?: RequestInit) => {
     try {
@@ -35,35 +36,34 @@ export default function App() {
       }
       throw new Error(`Invalid response type: ${contentType}`);
     } catch (error) {
-      console.warn(`Fetch failed for ${url}:`, error);
+      // console.warn(`Fetch failed for ${url}:`, error);
       throw error;
     }
   };
 
   useEffect(() => {
-    // Check connection and get version
-    fetchJson(`${API_BASE}/health`)
-      .then(data => {
-        setIsConnected(true);
-        if (data.version) setServerVersion(data.version);
-      })
-      .catch(() => setIsConnected(false));
-
-    // Load Config
+    // Initial Load
     fetchJson(`${API_BASE}/config`)
       .then(data => setConfig(data))
       .catch(console.error);
 
-    // Poll Logs
-    const poll = () => {
-      fetchJson(`${API_BASE}/logs`)
-        .then(data => {
-            setLogs(data);
-            const lastLog = data[data.length - 1];
-            if (lastLog && lastLog.message.includes('Starting')) setIsProcessing(true);
-            if (lastLog && (lastLog.message.includes('complete') || lastLog.message.includes('FAILURE'))) setIsProcessing(false);
-        })
-        .catch(() => {}); // Silent fail on logs
+    // Poll Status and Logs
+    const poll = async () => {
+      try {
+        // 1. Get Status (Is it running?)
+        const statusData = await fetchJson(`${API_BASE}/status`);
+        setIsConnected(true);
+        setIsProcessing(statusData.isProcessing);
+        setServerVersion(statusData.version);
+        if (statusData.lastSyncTime) setLastSyncTime(statusData.lastSyncTime);
+
+        // 2. Get Logs
+        const logsData = await fetchJson(`${API_BASE}/logs`);
+        setLogs(logsData);
+
+      } catch (e) {
+        setIsConnected(false);
+      }
     };
 
     poll();
@@ -86,7 +86,7 @@ export default function App() {
   };
 
   const triggerSync = async () => {
-    setIsProcessing(true);
+    setIsProcessing(true); // Optimistic update
     try {
       await fetchJson(`${API_BASE}/sync`, { method: 'POST' });
     } catch (e) {
@@ -137,7 +137,7 @@ export default function App() {
                   </h2>
                   
                   <p className="text-sm text-slate-400 mb-6 leading-relaxed">
-                    Trigger the synchronization process manually. Automated sync runs according to the schedule defined in settings.
+                    Trigger the synchronization process manually. 
                   </p>
 
                   <button
@@ -159,11 +159,17 @@ export default function App() {
                 </div>
 
                 <div className="bg-slate-900 p-6 rounded-xl border border-slate-800">
-                   <h3 className="text-sm font-semibold text-slate-300 mb-2">Daemon Status</h3>
+                   <h3 className="text-sm font-semibold text-slate-300 mb-2">Status</h3>
                    <div className="flex items-center gap-3 mb-3">
                       <Wifi size={16} className={isConnected ? "text-green-500" : "text-red-500"} />
                       <span className="text-sm text-slate-400">
-                        {isConnected ? 'Connected' : 'Disconnected'}
+                        {isConnected ? 'Service Connected' : 'Service Disconnected'}
+                      </span>
+                   </div>
+                   <div className="flex items-center gap-3 mb-3">
+                      <Clock size={16} className="text-slate-500" />
+                      <span className="text-sm text-slate-400">
+                        Last Sync: <span className="text-slate-200">{lastSyncTime ? new Date(lastSyncTime).toLocaleTimeString() : 'Never'}</span>
                       </span>
                    </div>
                    <div className="text-xs text-slate-500 border-t border-slate-800 pt-3">

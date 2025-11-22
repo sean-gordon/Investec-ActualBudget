@@ -17,7 +17,7 @@ const CONFIG_FILE = path.join(DATA_DIR, 'settings.json');
 const ACTUAL_DATA_DIR = path.join(DATA_DIR, 'actual-data');
 
 // VERSION TRACKING
-const SCRIPT_VERSION = "2.5.0 - Stability Fix";
+const SCRIPT_VERSION = "2.6.0 - Robust Sync";
 
 // --- Global Error Handlers (Prevent silent crashes) ---
 process.on('uncaughtException', (err) => {
@@ -33,7 +33,9 @@ app.use(bodyParser.json());
 
 // Request logging for debug
 app.use((req, res, next) => {
-  console.log(`[${req.method}] ${req.url}`);
+  if (req.url !== '/api/status' && req.url !== '/api/logs') {
+    console.log(`[${req.method}] ${req.url}`);
+  }
   next();
 });
 
@@ -41,10 +43,12 @@ app.use((req, res, next) => {
 let currentTask = null;
 let isProcessing = false;
 let logs = [];
+let lastSyncTime = null;
 const MAX_LOGS = 100;
 
 // Singleton State for Actual API
 let isActualInitialized = false;
+let loadedBudgetId = null;
 
 const addLog = (message, type = 'info') => {
   const entry = { timestamp: Date.now(), message, type };
@@ -121,8 +125,9 @@ const initActualApi = async () => {
 const getInvestecToken = async (clientId, secretId, apiKey) => {
   const authString = `${clientId}:${secretId}`;
   const base64Auth = Buffer.from(authString).toString('base64');
+  const baseUrl = process.env.INVESTEC_BASE_URL || "https://openapi.investec.com";
   
-  const response = await fetch("https://openapi.investec.com/identity/v2/oauth2/token", {
+  const response = await fetch(`${baseUrl}/identity/v2/oauth2/token`, {
     method: 'POST',
     headers: {
       'Authorization': `Basic ${base64Auth}`,
@@ -141,17 +146,19 @@ const getInvestecToken = async (clientId, secretId, apiKey) => {
 };
 
 const getInvestecAccounts = async (token) => {
-  const response = await fetch("https://openapi.investec.com/za/pb/v1/accounts", {
+  const baseUrl = process.env.INVESTEC_BASE_URL || "https://openapi.investec.com";
+  const response = await fetch(`${baseUrl}/za/pb/v1/accounts`, {
     headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
   });
   if (!response.ok) throw new Error(`Get Accounts failed: ${await response.text()}`);
   const data = await response.json();
-  if (!data?.data?.accounts) throw new Error("Invalid account data received");
+  if (!data?.data?.accounts) throw new Error("Invalid account data received from Investec");
   return data.data.accounts; 
 };
 
 const getTransactions = async (token, accountId, fromDate, toDate) => {
-  const url = `https://openapi.investec.com/za/pb/v1/accounts/${accountId}/transactions?fromDate=${fromDate}&toDate=${toDate}`;
+  const baseUrl = process.env.INVESTEC_BASE_URL || "https://openapi.investec.com";
+  const url = `${baseUrl}/za/pb/v1/accounts/${accountId}/transactions?fromDate=${fromDate}&toDate=${toDate}`;
   const response = await fetch(url, {
     headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
   });
@@ -172,14 +179,16 @@ const transformTransaction = (t) => {
   if (t.cardNumber) notesParts.push(`Ref: ${t.cardNumber}`);
   const notes = notesParts.join(' | ');
 
-  const safeDesc = (t.description || '').replace(/[^a-z0-9]/gi, '').substring(0, 30);
+  const safeDesc = (t.description || 'Unknown').replace(/[^a-z0-9 ]/gi, '').substring(0, 50);
+  // Composite ID: Account + Order + Date + Amount + Description
+  // Adding Description/Amount ensures uniqueness if postedOrder is not unique enough
   const importId = `${t.accountId}:${t.postedOrder ?? 0}:${date}:${Math.abs(amount)}:${safeDesc}`;
 
   return {
     date: date,
     amount: amount, 
-    payee_name: t.description,
-    imported_payee: t.description,
+    payee_name: t.description || 'Unknown Payee',
+    imported_payee: t.description || 'Unknown Payee',
     notes: notes,
     imported_id: importId, 
     cleared: true,
@@ -188,77 +197,99 @@ const transformTransaction = (t) => {
 
 const runSync = async () => {
   if (isProcessing) {
-    addLog('Sync already in progress.', 'info');
+    addLog('Sync request ignored: Process already running.', 'info');
     return;
   }
   
   const config = loadConfig();
   
   if (!config.investecClientId || !config.actualServerUrl || !config.actualBudgetId) {
-    addLog('Missing configuration. Check settings.', 'error');
+    addLog('Configuration missing. Please check settings.', 'error');
     return;
   }
 
   isProcessing = true;
-  addLog(`Starting sync process (Server v${SCRIPT_VERSION})`, 'info');
+  addLog(`Starting sync process...`, 'info');
 
   try {
-    // 1. Init Actual (Singleton)
+    // --- 1. Budget Connection (Smart Switching) ---
+    
+    // If the requested budget is different from the loaded one, we must reset.
+    if (loadedBudgetId && loadedBudgetId !== config.actualBudgetId) {
+      addLog(`Budget configuration changed. Switching from ${loadedBudgetId} to ${config.actualBudgetId}...`, 'info');
+      try {
+        await actual.shutdown();
+      } catch (e) {
+        console.warn("Shutdown warning:", e);
+      }
+      isActualInitialized = false;
+      loadedBudgetId = null;
+    }
+
+    // Ensure engine is running
     await initActualApi();
 
-    // 2. Investec Auth
+    if (!loadedBudgetId) {
+      // First time load or budget switch
+      addLog(`Downloading Budget: ${config.actualBudgetId}...`, 'info');
+      await actual.downloadBudget(config.actualBudgetId, {
+        password: config.actualPassword,
+        serverURL: config.actualServerUrl
+      });
+      loadedBudgetId = config.actualBudgetId;
+      addLog('Budget downloaded and connected.', 'success');
+    } else {
+      // Already connected, just pull latest changes
+      addLog('Syncing with Actual Server (Pulling)...', 'info');
+      await actual.sync();
+    }
+
+    // --- 2. Investec Data Fetch ---
     addLog('Authenticating with Investec...', 'info');
     const token = await getInvestecToken(config.investecClientId, config.investecSecretId, config.investecApiKey);
-    addLog('Investec Authenticated.', 'success');
-
+    
     const investecAccounts = await getInvestecAccounts(token);
     addLog(`Found ${investecAccounts.length} Investec accounts.`, 'info');
 
     const endDate = new Date();
     const startDate = new Date();
-    startDate.setFullYear(startDate.getFullYear() - 1);
+    startDate.setFullYear(startDate.getFullYear() - 1); // Look back 1 year
     const fromStr = startDate.toISOString().split('T')[0];
     const toStr = endDate.toISOString().split('T')[0];
 
-    // 3. Actual Budget Connect
-    addLog(`Downloading Budget ID: ${config.actualBudgetId}...`, 'info');
-    try {
-      await actual.downloadBudget(config.actualBudgetId, {
-        password: config.actualPassword,
-        serverURL: config.actualServerUrl
-      });
-      addLog('Budget connected.', 'success');
-    } catch (e) {
-      throw new Error(`Actual Budget Connect Failed: ${e.message}`);
-    }
-
+    // --- 3. Match and Import ---
     const actualAccounts = await actual.getAccounts();
     let totalImported = 0;
+    let processedAccounts = 0;
 
-    // 4. Loop Accounts
     for (const invAcc of investecAccounts) {
       const invName = invAcc.accountName;
       const invId = invAcc.accountId;
 
+      // Fuzzy match account name
       const matchedActualAccount = actualAccounts.find(a => 
-        a.name.toLowerCase() === invName.toLowerCase() || 
+        a.name.toLowerCase().trim() === invName.toLowerCase().trim() || 
         a.name.toLowerCase().includes(invName.toLowerCase())
       );
 
       if (!matchedActualAccount) {
-        addLog(`SKIPPING: No Actual account matches "${invName}".`, 'error');
+        addLog(`Warning: No Actual Budget account matches Investec account "${invName}". Skipping.`, 'error');
         continue;
       }
 
       try {
         const rawTxs = await getTransactions(token, invId, fromStr, toStr);
-        const actualTxs = rawTxs.map(transformTransaction);
-        addLog(`Account "${invName}": Found ${actualTxs.length} transactions.`, 'info');
         
-        if (actualTxs.length > 0) {
-          const BATCH_SIZE = 500;
-          let batchCount = 0;
-          for (let i = 0; i < actualTxs.length; i += BATCH_SIZE) {
+        if (rawTxs.length === 0) {
+           continue;
+        }
+
+        const actualTxs = rawTxs.map(transformTransaction);
+        
+        // Import in batches to prevent memory issues/timeouts
+        const BATCH_SIZE = 200;
+        let batchCount = 0;
+        for (let i = 0; i < actualTxs.length; i += BATCH_SIZE) {
              const batch = actualTxs.slice(i, i + BATCH_SIZE);
              const result = await actual.importTransactions(matchedActualAccount.id, batch);
              
@@ -266,28 +297,37 @@ const runSync = async () => {
              const updated = result?.updated?.length || 0;
              totalImported += added;
              batchCount += added + updated;
-          }
-          addLog(`Processed ${batchCount} txs for "${matchedActualAccount.name}" (${totalImported} new)`, 'info');
         }
+        
+        if (batchCount > 0) {
+            addLog(`Imported ${batchCount} txs into "${matchedActualAccount.name}"`, 'info');
+        }
+        processedAccounts++;
+
       } catch (e) {
-        addLog(`Error processing ${invName}: ${e.message}`, 'error');
+        addLog(`Error processing account ${invName}: ${e.message}`, 'error');
       }
     }
 
-    // 5. Sync
-    if (totalImported > 0) {
+    // --- 4. Final Sync Push ---
+    if (processedAccounts > 0) {
       addLog('Pushing changes to Actual Server...', 'info');
       await actual.sync();
       addLog(`Sync complete. ${totalImported} new transactions imported.`, 'success');
     } else {
-      addLog('Sync complete. No new transactions found.', 'success');
+      addLog('Sync complete. No accounts processed.', 'info');
     }
+    
+    lastSyncTime = Date.now();
 
   } catch (e) {
     addLog(`CRITICAL SYNC FAILURE: ${e.message}`, 'error');
-    console.error(e);
+    console.error("Detailed Sync Error:", e);
+    
+    // Reset state on critical failure to ensure next run starts clean
+    isActualInitialized = false;
+    loadedBudgetId = null;
   } finally {
-    // We DO NOT shutdown here anymore to keep the singleton connection alive
     isProcessing = false;
   }
 };
@@ -305,9 +345,17 @@ const initialConfig = loadConfig();
 setupCron(initialConfig.syncSchedule);
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', version: SCRIPT_VERSION }));
+
+app.get('/api/status', (req, res) => res.json({ 
+  isProcessing, 
+  lastSyncTime,
+  version: SCRIPT_VERSION,
+  budgetLoaded: !!loadedBudgetId
+}));
+
 app.get('/api/config', (req, res) => res.json(loadConfig()));
 app.post('/api/config', (req, res) => { saveConfig(req.body); res.json({ status: 'ok' }); });
-app.post('/api/sync', (req, res) => { runSync(); res.json({ status: 'ok' }); });
+app.post('/api/sync', (req, res) => { runSync(); res.json({ status: 'started' }); });
 app.get('/api/logs', (req, res) => res.json(logs));
 
 app.use(express.static(path.join(__dirname, 'dist')));
