@@ -16,16 +16,17 @@ const DATA_DIR = path.join(__dirname, 'data');
 const CONFIG_FILE = path.join(DATA_DIR, 'settings.json');
 const ACTUAL_DATA_DIR = path.join(DATA_DIR, 'actual-data');
 
+// Fix for self-signed certs or local network issues
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+
 // VERSION TRACKING
-const SCRIPT_VERSION = "2.8.0 - Stable Network";
+const SCRIPT_VERSION = "2.9.0 - Data Cleanup Fix";
 
 // --- Global Error Handlers ---
 process.on('uncaughtException', (err) => {
   console.error('CRITICAL: Uncaught Exception:', err);
-  // Attempt to log if logs array exists
   try {
-    const entry = { timestamp: Date.now(), message: `System Critical: ${err.message}`, type: 'error' };
-    if (typeof logs !== 'undefined') logs.push(entry);
+    if (typeof logs !== 'undefined') logs.push({ timestamp: Date.now(), message: `System Critical: ${err.message}`, type: 'error' });
   } catch (e) {}
 });
 
@@ -104,13 +105,11 @@ const saveConfig = (newConfig) => {
 
 // --- Logic ---
 
-// Helper: Check if Actual Server is reachable before trying the heavy library
 const checkServerConnectivity = async (url) => {
   try {
-    // Try a lightweight fetch. Even 404 means server is reachable.
-    // We try the root path.
-    await fetch(url, { method: 'HEAD' });
-    return { success: true };
+    // Try a HEAD request to root. Even 404 is fine, just need network connectivity.
+    const res = await fetch(url, { method: 'HEAD' });
+    return { success: true, status: res.status };
   } catch (e) {
     return { success: false, error: e.message };
   }
@@ -125,9 +124,24 @@ const initActualApi = async () => {
     isActualInitialized = true;
   } catch (e) {
     addLog(`Failed to init Actual API: ${e.message}`, 'error');
-    // Try to cleanup if init failed halfway
     try { await actual.shutdown(); } catch(err) {}
     throw e;
+  }
+};
+
+const resetActualState = async () => {
+  addLog('Resetting Actual API state and cleaning local data...', 'info');
+  try { await actual.shutdown(); } catch(e) {}
+  isActualInitialized = false;
+  loadedBudgetId = null;
+  
+  // Aggressively clean up data directory to remove corrupt lockfiles or dbs
+  try {
+    fs.rmSync(ACTUAL_DATA_DIR, { recursive: true, force: true });
+    fs.mkdirSync(ACTUAL_DATA_DIR, { recursive: true });
+    addLog('Local budget cache cleared.', 'info');
+  } catch (e) {
+    console.error("Failed to clean data dir:", e);
   }
 };
 
@@ -218,21 +232,16 @@ const runSync = async () => {
   addLog(`Starting sync process...`, 'info');
 
   try {
-    // --- PRE-FLIGHT: Check Server Connectivity ---
-    // This fixes the "hanging" issue if Docker networking is wrong
+    // --- PRE-FLIGHT ---
     const connTest = await checkServerConnectivity(config.actualServerUrl);
     if (!connTest.success) {
-      throw new Error(`Cannot reach Actual Server at ${config.actualServerUrl}. Error: ${connTest.error}. If running in Docker, try 'http://host.docker.internal:5006'.`);
+      throw new Error(`Cannot reach Actual Server at ${config.actualServerUrl}. Error: ${connTest.error}. Check Docker networking or if Server is listening on 0.0.0.0.`);
     }
 
     // --- 1. Setup Actual Budget ---
     try {
-      // Check if we need to reset connection (e.g. budget ID changed)
       if (loadedBudgetId && loadedBudgetId !== config.actualBudgetId) {
-        addLog('Budget ID changed. Resetting connection...', 'info');
-        await actual.shutdown();
-        isActualInitialized = false;
-        loadedBudgetId = null;
+        await resetActualState();
       }
 
       await initActualApi();
@@ -246,17 +255,20 @@ const runSync = async () => {
         loadedBudgetId = config.actualBudgetId;
         addLog('Budget downloaded successfully.', 'success');
       } else {
-        // Sync upstream changes first
         await actual.sync();
       }
     } catch (e) {
-      // CRITICAL: If Actual fails, we must shutdown to release locks
       addLog(`Actual Budget Error: ${e.message}`, 'error');
-      console.error("Actual API Stack:", e);
-      try { await actual.shutdown(); } catch(err) {}
-      isActualInitialized = false; 
-      loadedBudgetId = null;
-      throw new Error("Failed to connect/sync with Actual Budget."); // Stop execution
+      console.error("Actual API Error Detail:", e);
+      
+      // Specific handling for "Could not get remote files"
+      if (e.message.includes('Could not get remote files')) {
+        addLog('⚠️ Hint: This error usually means the Sync ID does not exist on the server OR the server rejected the password.', 'error');
+      }
+
+      // Reset everything on critical failure to ensure fresh retry
+      await resetActualState();
+      throw new Error("Failed to connect/sync with Actual Budget. State has been reset.");
     }
 
     // --- 2. Fetch Investec ---
@@ -300,7 +312,6 @@ const runSync = async () => {
         if (rawTxs.length > 0) {
           const actualTxs = rawTxs.map(transformTransaction);
           
-          // Import in smaller batches to avoid timeouts
           const BATCH_SIZE = 100;
           let batchCount = 0;
           
@@ -332,7 +343,6 @@ const runSync = async () => {
     lastSyncTime = Date.now();
 
   } catch (e) {
-    // Log the top-level error that stopped the sync
     addLog(`❌ Sync Aborted: ${e.message}`, 'error');
   } finally {
     isProcessing = false;
@@ -366,7 +376,6 @@ app.get('/api/config', (req, res) => res.json(loadConfig()));
 app.post('/api/config', (req, res) => { saveConfig(req.body); res.json({ status: 'ok' }); });
 
 app.post('/api/sync', (req, res) => { 
-  // Fire and forget, but handle the promise
   if (!isProcessing) {
     runSync().catch(e => console.error("Manual sync execution error:", e));
     res.json({ status: 'started' }); 
