@@ -138,14 +138,21 @@ const pushToActual = async (serverUrl, budgetId, password, transactions) => {
   const headers = { 'Content-Type': 'application/json' };
   if (password) headers['x-actual-password'] = password;
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(payload)
-  });
+  console.log(`Attempting push to: ${url}`);
 
-  if (!response.ok) {
-    throw new Error(`Actual Sync failed (${response.status}): ${await response.text()}`);
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      throw new Error(`Actual Sync failed (${response.status}): ${await response.text()}`);
+    }
+  } catch (error) {
+    console.error("Push Error Detail:", error);
+    throw new Error(`Connection to Actual failed at ${url}. Details: ${error.message}`);
   }
 };
 
@@ -191,6 +198,7 @@ const runSync = async () => {
     const actualTx = allTx.map(transformTransaction);
 
     if (config.actualServerUrl) {
+      addLog(`Pushing to Actual...`, 'info');
       await pushToActual(config.actualServerUrl, config.actualBudgetId, config.actualPassword, actualTx);
       addLog(`Successfully pushed ${actualTx.length} transactions to Actual.`, 'success');
     } else {

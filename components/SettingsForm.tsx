@@ -89,8 +89,11 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
                 onChange={handleChange}
                 type="text"
                 className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-actual-500 outline-none text-slate-200"
-                placeholder="http://localhost:5006"
+                placeholder="http://192.168.1.50:5006"
               />
+              <p className="text-[10px] text-slate-500 mt-1">
+                <span className="text-yellow-500">Docker Note:</span> Use your host IP (e.g., 192.168.x.x), not "localhost".
+              </p>
             </div>
              <div className="grid grid-cols-2 gap-4">
                 <div>
