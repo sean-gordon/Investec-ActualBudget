@@ -174,6 +174,22 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
              </div>
           )}
 
+           {/* MISSING FILE ERROR HELP */}
+           {!actualResult?.success && actualResult?.msg.includes("server cannot find budget file") && (
+            <div className="bg-orange-950/40 border border-orange-800 p-3 rounded mb-4 text-xs">
+                <p className="font-bold text-orange-400 mb-1">Missing "Upload" button?</p>
+                <p className="text-slate-300 mb-2">
+                    If your budget is Local but you don't see "Upload to Server", follow these steps to force it to the server:
+                </p>
+                <ol className="list-decimal pl-4 space-y-1 text-slate-400">
+                    <li>Go to <strong>Settings</strong> &gt; <strong>Export Data</strong> (Download the zip).</li>
+                    <li>Go to <strong>File Menu</strong> (top right) &gt; <strong>Close File</strong>.</li>
+                    <li>Click <strong>Import file</strong> &gt; <strong>Actual</strong> &gt; Select the zip.</li>
+                    <li>Open <strong>Settings</strong> &gt; <strong>Advanced</strong> &gt; Copy the <strong>NEW</strong> Sync ID.</li>
+                </ol>
+            </div>
+           )}
+
           <div className="grid grid-cols-1 gap-4">
              <div>
               <label className="block text-xs text-slate-400 mb-1">Server URL</label>
@@ -200,9 +216,10 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
                     className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-actual-500 outline-none text-slate-200"
                     placeholder="uuid (Settings > Advanced)"
                   />
-                  <div className="mt-1 flex gap-1 items-start text-[10px] text-slate-500">
-                    <HelpCircle size={10} className="mt-0.5" />
-                    <span>In Actual: Settings &gt; Advanced &gt; Sync ID. <strong>Must be "Remote" (Uploaded).</strong></span>
+                  <div className="mt-2 text-[10px] text-slate-400 bg-black/20 p-2 rounded border border-slate-800">
+                    <p className="font-semibold text-slate-300 mb-1">Check Status:</p>
+                    <p className="mb-1">Go to <span className="text-white">Settings &gt; Advanced</span>.</p>
+                    <p>If status is "Local", refer to the help box above to Export/Import.</p>
                   </div>
                 </div>
                 <div>
@@ -215,10 +232,10 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
                     className="w-full bg-slate-950 border border-red-900/50 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-red-500 outline-none text-slate-200"
                     placeholder="Leave EMPTY if no E2E"
                   />
+                  <div className="mt-2 text-[10px] text-slate-500 bg-slate-950/50 p-2 rounded border border-slate-800">
+                    <span className="font-bold text-red-400">WARNING:</span> NOT your login password. Only use if <strong>End-to-End Encryption</strong> is enabled. Otherwise leave empty.
+                  </div>
                 </div>
-             </div>
-             <div className="text-[10px] text-slate-500 bg-slate-950/50 p-2 rounded border border-slate-800">
-                <span className="font-bold text-red-400">WARNING:</span> This is NOT your user login password. Only enter a password here if you have enabled <strong>End-to-End Encryption</strong> for this specific budget file. If you haven't, <strong>leave this field empty</strong>.
              </div>
           </div>
         </div>

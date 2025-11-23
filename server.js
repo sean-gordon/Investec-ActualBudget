@@ -27,7 +27,7 @@ const ACTUAL_DATA_DIR = path.join(DATA_DIR, 'actual-data');
 // Fix for self-signed certs
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
-const SCRIPT_VERSION = "3.6.0 - Transaction Merge Mode";
+const SCRIPT_VERSION = "3.7.0 - Re-Import Fix";
 
 // ==========================================
 // WORKER PROCESS LOGIC
@@ -197,7 +197,7 @@ if (process.env.WORKER_ACTION) {
                              log(`Retry failed: ${retryErr.message}`, 'error');
                              // This is the most common error - specifically identify it
                              if (retryErr.message.includes('Could not get remote files')) {
-                                throw new Error(`SERVER ERROR: The server cannot find budget file "${budgetId}".\n\n⚠️ SOLUTION: Open your Budget in the browser, go to Settings (top left) > "Show Advanced Settings" > "Sync ID".\nEnsure this file says "Remote". If it says "Local", click "Upload to Server".`);
+                                throw new Error(`SERVER ERROR: The server cannot find budget file "${budgetId}".\n\n⚠️ SOLUTION: Go to File > Close File > Import File > Actual (Zip). This will re-upload it to the server and give you a valid Sync ID.`);
                              }
                              throw retryErr;
                         }
@@ -205,7 +205,7 @@ if (process.env.WORKER_ACTION) {
                         // Log raw error for debugging
                         log(`Raw API Error: ${JSON.stringify(dlErr, Object.getOwnPropertyNames(dlErr))}`, 'error');
                         if (dlErr.message.includes('Could not get remote files')) {
-                            throw new Error(`SERVER ERROR: The server cannot find budget file "${budgetId}".\n\n⚠️ SOLUTION: Open your Budget in the browser, go to Settings (top left) > "Show Advanced Settings" > "Sync ID".\nEnsure this file says "Remote". If it says "Local", click "Upload to Server".`);
+                            throw new Error(`SERVER ERROR: The server cannot find budget file "${budgetId}".\n\n⚠️ SOLUTION: Go to File > Close File > Import File > Actual (Zip). This will re-upload it to the server and give you a valid Sync ID.`);
                         }
                         throw new Error(`Download Failed. ${dlErr.message}`);
                     }
