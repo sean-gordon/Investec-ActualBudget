@@ -20,13 +20,16 @@ const ACTUAL_DATA_DIR = path.join(DATA_DIR, 'actual-data');
 // Fix for self-signed certs
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
-const SCRIPT_VERSION = "3.0.0 - Process Isolation";
+const SCRIPT_VERSION = "3.1.0 - Diagnostic Mode";
 
 // ==========================================
 // WORKER PROCESS LOGIC
 // ==========================================
 // This block only runs when the script is spawned as a child process
 if (process.env.WORKER_ACTION) {
+    // Ensure TLS reject is disabled in worker too
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+
     const log = (msg, type = 'info') => {
         if (process.send) process.send({ type: 'log', message: msg, level: type });
     };
@@ -131,27 +134,37 @@ if (process.env.WORKER_ACTION) {
             // --- ACTION: TEST ACTUAL / SYNC ---
             if (action === 'test-actual' || action === 'sync') {
                 
-                // 1. TCP Check (Fast Fail)
-                const urlObj = new URL(payload.actualServerUrl);
-                const host = urlObj.hostname;
-                const port = urlObj.port || (urlObj.protocol === 'https:' ? 443 : 80);
-                
-                await new Promise((resolve, reject) => {
-                    const socket = new net.Socket();
-                    socket.setTimeout(2000);
-                    socket.on('connect', () => { socket.destroy(); resolve(); });
-                    socket.on('timeout', () => { socket.destroy(); reject(new Error(`Timeout connecting to ${host}:${port}`)); });
-                    socket.on('error', (err) => { socket.destroy(); reject(err); });
-                    socket.connect(Number(port), host);
-                });
+                const rawUrl = payload.actualServerUrl || '';
+                const serverUrl = rawUrl.replace(/\/$/, ''); // Strip trailing slash
+                const password = payload.actualPassword;
+                const budgetId = payload.actualBudgetId;
+
+                if (!serverUrl || !budgetId) {
+                    throw new Error("Missing Server URL or Budget ID");
+                }
+
+                // 1. HTTP Network Diagnostic (Application Level Check)
+                log(`Pinging ${serverUrl}/info...`, 'info');
+                try {
+                    const infoRes = await fetch(`${serverUrl}/info`);
+                    if (!infoRes.ok) {
+                        const text = await infoRes.text();
+                        throw new Error(`Server returned ${infoRes.status}: ${text}`);
+                    }
+                    log('Server reachable via HTTP.', 'success');
+                } catch (err) {
+                    // This catches ECONNREFUSED, Host Unreachable, etc.
+                    throw new Error(`Network Error: Cannot reach ${serverUrl}. Is the server running? Details: ${err.message}`);
+                }
 
                 // 2. Clean Start
                 cleanDataDir();
-                await actual.init({ dataDir: ACTUAL_DATA_DIR, serverURL: payload.actualServerUrl });
+                log(`Initializing Engine...`, 'info');
+                await actual.init({ dataDir: ACTUAL_DATA_DIR, serverURL: serverUrl });
 
                 // 3. Download
-                log(`Connecting to Budget ID: ${payload.actualBudgetId}`, 'info');
-                await actual.downloadBudget(payload.actualBudgetId, { password: payload.actualPassword || undefined });
+                log(`Downloading Budget: ${budgetId}...`, 'info');
+                await actual.downloadBudget(budgetId, { password: password || undefined });
 
                 if (action === 'test-actual') {
                     process.send({ type: 'result', success: true, message: "Connection verified! Budget downloaded." });
@@ -218,7 +231,12 @@ if (process.env.WORKER_ACTION) {
 
         } catch (e) {
             let msg = e.message;
-            if (msg.includes('Could not get remote files')) msg = "Invalid Sync ID/Password OR Server refused connection.";
+            // If we are here, it means the earlier HTTP Network Check PASSED. 
+            // So "Could not get remote files" now definitively means Auth/ID failure.
+            if (msg.includes('Could not get remote files')) {
+                msg = "Auth Failed: Invalid Password or Sync ID (Server rejected download).";
+            }
+            
             log(`ERROR: ${msg}`, 'error');
             if (process.send) process.send({ type: 'result', success: false, message: msg });
             process.exit(1);
@@ -372,4 +390,4 @@ app.listen(PORT, '0.0.0.0', () => {
     addLog(`System Online. v${SCRIPT_VERSION}`, 'success');
 });
 
-} // End Main Process check
+} // End Main Process
