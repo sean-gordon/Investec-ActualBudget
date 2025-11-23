@@ -27,7 +27,7 @@ const ACTUAL_DATA_DIR = path.join(DATA_DIR, 'actual-data');
 // Fix for self-signed certs
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
-const SCRIPT_VERSION = "5.0.0 - Auto-Create Accounts";
+const SCRIPT_VERSION = "5.1.0 - Account Separation Fix";
 
 // ==========================================
 // WORKER PROCESS LOGIC
@@ -67,8 +67,23 @@ if (process.env.WORKER_ACTION) {
                 if (t.type === 'DEBIT') amount = -Math.abs(amount);
                 else amount = Math.abs(amount);
 
-                // 2. Date
-                const date = t.postingDate || t.transactionDate || t.actionDate;
+                // 2. Date Priority
+                // Credit cards often have transactionDate but no postingDate until cleared.
+                // We prefer transactionDate (when you bought it) over postingDate (when bank processed it).
+                let date = t.transactionDate || t.postingDate || t.actionDate;
+                
+                // Fallback / Validation
+                if (!date) {
+                    // Log warning if possible, but for map function we just return a valid date or null to filter later
+                    // If we return today's date, it confuses the user. better to skip? 
+                    // Let's use valueDate as last resort
+                    date = t.valueDate;
+                }
+                
+                // Ensure YYYY-MM-DD
+                if (date && date.includes('T')) {
+                    date = date.split('T')[0];
+                }
 
                 // 3. Notes
                 const notesParts = [];
@@ -87,7 +102,9 @@ if (process.env.WORKER_ACTION) {
                     : `:${Math.abs(amount)}`; 
 
                 // We keep accountId in the ID so uniqueness is preserved across multiple source accounts
-                const importId = `${t.accountId}:${date}:${safeDesc}${orderSuffix}`;
+                // Use a fallback for date in ID to prevent 'undefined' in string
+                const idDate = date || 'nodate'; 
+                const importId = `${t.accountId}:${idDate}:${safeDesc}${orderSuffix}`;
 
                 return {
                     date,
@@ -218,7 +235,7 @@ if (process.env.WORKER_ACTION) {
 
                 const endDate = new Date();
                 const startDate = new Date();
-                startDate.setFullYear(startDate.getFullYear() - 1);
+                startDate.setFullYear(startDate.getFullYear() - 1); // 1 Year back
                 const fromStr = startDate.toISOString().split('T')[0];
                 const toStr = endDate.toISOString().split('T')[0];
 
@@ -227,49 +244,57 @@ if (process.env.WORKER_ACTION) {
 
                 // --- ACCOUNT MAPPING LOOP ---
                 for (const invAcc of investecData.accounts) {
-                    const invName = invAcc.accountName.trim();
-                    const invProduct = (invAcc.productName || "").toLowerCase();
+                    // ACCOUNT NAMING STRATEGY
+                    // 1. Use Reference Name (User Nickname) if available
+                    // 2. Use Product Name + Last 4 digits if no Reference Name
+                    // This prevents "Mr SD Gordon" (accountName) from merging all 3 accounts
+                    let uniqueName = invAcc.referenceName;
+                    if (!uniqueName || uniqueName.trim() === '') {
+                         uniqueName = `${invAcc.productName} ${invAcc.accountNumber.slice(-4)}`;
+                    }
+                    uniqueName = uniqueName.trim();
+
+                    // Determine type based on product name
+                    let accType = 'checking'; 
+                    const prodNameLower = (invAcc.productName || "").toLowerCase();
+                    if (prodNameLower.includes('credit card') || prodNameLower.includes('private bank account') === false) { 
+                        // Simplified heuristic: if it says credit, it's credit. 
+                        if (prodNameLower.includes('credit')) accType = 'credit';
+                    }
                     
-                    // 1. Find Account
-                    // Case-insensitive match on name
+                    // 1. Find Account in Actual
                     let matchedAccount = actualAccounts.find(a => 
-                        a.name.toLowerCase().trim() === invName.toLowerCase()
+                        a.name.toLowerCase().trim() === uniqueName.toLowerCase()
                     );
 
                     // 2. Auto-Create if missing
                     if (!matchedAccount) {
-                        log(`Account "${invName}" does not exist. Creating...`, 'info');
-                        
-                        // Determine type based on product name
-                        let accType = 'checking'; // Default
-                        if (invProduct.includes('credit card') || invName.toLowerCase().includes('credit')) {
-                            accType = 'credit';
-                        }
+                        log(`Account "${uniqueName}" (Investec) not found in Actual. Creating...`, 'info');
                         
                         try {
                             const newId = await actual.createAccount({
-                                name: invName,
+                                name: uniqueName,
                                 type: accType,
                                 offbudget: false
                             });
                             
-                            log(`✅ Created account: "${invName}" (ID: ${newId})`, 'success');
+                            log(`✅ Created account: "${uniqueName}"`, 'success');
                             
                             // Refresh local list and update matchedAccount
                             actualAccounts = await actual.getAccounts();
                             matchedAccount = actualAccounts.find(a => a.id === newId);
                         } catch (createErr) {
-                            log(`❌ Failed to create account "${invName}": ${createErr.message}`, 'error');
-                            continue; // Skip processing this account if we couldn't create it
+                            log(`❌ Failed to create account "${uniqueName}": ${createErr.message}`, 'error');
+                            continue; 
                         }
                     }
 
                     if (!matchedAccount) {
-                        log(`Skipping "${invName}" (Could not resolve account ID).`, 'error');
+                        log(`Skipping "${uniqueName}" (Sync Error).`, 'error');
                         continue;
                     }
 
-                    log(`Processing: "${invName}" -> Actual: "${matchedAccount.name}"`, 'info');
+                    log(`Syncing: "${uniqueName}"`, 'info');
 
                     // 3. Fetch Transactions for this specific account
                     const txUrl = `${investecData.baseUrl}/za/pb/v1/accounts/${invAcc.accountId}/transactions?fromDate=${fromStr}&toDate=${toStr}`;
@@ -280,7 +305,14 @@ if (process.env.WORKER_ACTION) {
                     const rawTxs = (txData?.data?.transactions || []).map(t => ({ ...t, accountId: invAcc.accountId }));
 
                     if (rawTxs.length > 0) {
-                        const actualTxs = rawTxs.map(transformTransaction);
+                        const actualTxs = rawTxs
+                            .map(transformTransaction)
+                            .filter(t => t.date); // Remove transactions where date failed to parse
+
+                        if (actualTxs.length < rawTxs.length) {
+                             log(`  ⚠️ Skipped ${rawTxs.length - actualTxs.length} transactions due to missing dates.`, 'info');
+                        }
+
                         log(`  Importing ${actualTxs.length} transactions...`, 'info');
                         
                         const result = await actual.importTransactions(matchedAccount.id, actualTxs);
@@ -290,7 +322,7 @@ if (process.env.WORKER_ACTION) {
                             log(`  ✅ Added/Updated ${count} transactions.`, 'success');
                             totalImported += count;
                         } else {
-                            log(`  No new transactions (Duplicates).`, 'info');
+                            log(`  No new transactions.`, 'info');
                         }
                     } else {
                         log(`  No transactions in date range.`, 'info');
@@ -298,9 +330,9 @@ if (process.env.WORKER_ACTION) {
                 }
 
                 if (totalImported > 0) {
-                    log('Pushing all changes to server...', 'info');
+                    log('Pushing changes to server...', 'info');
                     await actual.sync(); 
-                    log(`Sync Complete. Total ${totalImported} added across all accounts.`, 'success');
+                    log(`Sync Complete. Total ${totalImported} new transactions.`, 'success');
                 } else {
                     log('Sync Complete. No data changes.', 'info');
                 }
