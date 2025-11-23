@@ -27,7 +27,7 @@ const ACTUAL_DATA_DIR = path.join(DATA_DIR, 'actual-data');
 // Fix for self-signed certs
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
-const SCRIPT_VERSION = "3.4.0 - Auto-Retry Auth";
+const SCRIPT_VERSION = "3.6.0 - Transaction Merge Mode";
 
 // ==========================================
 // WORKER PROCESS LOGIC
@@ -162,18 +162,22 @@ if (process.env.WORKER_ACTION) {
                         const text = await infoRes.text();
                         throw new Error(`Server returned ${infoRes.status}: ${text}`);
                     }
-                    log('Server reachable via HTTP.', 'success');
+                    const infoData = await infoRes.json().catch(() => ({}));
+                    log(`Server reachable. Type: ${infoData.type || 'unknown'}`, 'success');
                 } catch (err) {
                     throw new Error(`Network Error: Cannot reach ${serverUrl}. Is the server running? Details: ${err.message}`);
                 }
 
                 // 2. Clean Start
                 cleanDataDir();
-                log(`Initializing Engine...`, 'info');
+                log(`Initializing API Engine...`, 'info');
                 await actual.init({ dataDir: ACTUAL_DATA_DIR, serverURL: serverUrl });
+                
+                // FORCE: Set Server URL explicitly again to be absolutely sure
+                try { await actual.setServerURL(serverUrl); } catch(e) {}
 
                 // 3. Download
-                log(`Downloading Budget: ${budgetId}...`, 'info');
+                log(`Fetching budget context (Required for Transaction Merge)...`, 'info');
                 
                 try {
                     // Password handling: "" should be passed as undefined
@@ -182,31 +186,38 @@ if (process.env.WORKER_ACTION) {
                 } catch (dlErr) {
                     // RETRY LOGIC: If password was provided, try without it
                     if (password && password.length > 0) {
-                        log(`First attempt failed. Retrying WITHOUT password (in case it was a login password)...`, 'info');
+                        log(`First attempt failed. Retrying WITHOUT password...`, 'info');
                         try {
                             cleanDataDir(); // Reset data again
                             await actual.init({ dataDir: ACTUAL_DATA_DIR, serverURL: serverUrl }); // Re-init
+                            try { await actual.setServerURL(serverUrl); } catch(e) {}
                             await actual.downloadBudget(budgetId); // No password
                             log(`⚠️ SUCCESS! Connected without password. Please CLEAR the password field in settings.`, 'success');
                         } catch (retryErr) {
-                             // If retry fails, throw the original error or the new one
                              log(`Retry failed: ${retryErr.message}`, 'error');
-                             throw new Error(`Auth Failed. The server rejected the download. If you have E2E encryption, check the password. If not, clear the password.`);
+                             // This is the most common error - specifically identify it
+                             if (retryErr.message.includes('Could not get remote files')) {
+                                throw new Error(`SERVER ERROR: The server cannot find budget file "${budgetId}".\n\n⚠️ SOLUTION: Open your Budget in the browser, go to Settings (top left) > "Show Advanced Settings" > "Sync ID".\nEnsure this file says "Remote". If it says "Local", click "Upload to Server".`);
+                             }
+                             throw retryErr;
                         }
                     } else {
                         // Log raw error for debugging
                         log(`Raw API Error: ${JSON.stringify(dlErr, Object.getOwnPropertyNames(dlErr))}`, 'error');
+                        if (dlErr.message.includes('Could not get remote files')) {
+                            throw new Error(`SERVER ERROR: The server cannot find budget file "${budgetId}".\n\n⚠️ SOLUTION: Open your Budget in the browser, go to Settings (top left) > "Show Advanced Settings" > "Sync ID".\nEnsure this file says "Remote". If it says "Local", click "Upload to Server".`);
+                        }
                         throw new Error(`Download Failed. ${dlErr.message}`);
                     }
                 }
 
                 if (action === 'test-actual') {
-                    process.send({ type: 'result', success: true, message: "Connection verified! Budget downloaded." });
+                    process.send({ type: 'result', success: true, message: "Connection verified! Ready to merge transactions." });
                     return;
                 }
 
                 // --- SYNC LOGIC ---
-                log('Actual Budget connected.', 'success');
+                log('Actual Budget context loaded.', 'success');
                 
                 // Fetch Investec
                 log('Fetching Investec data...', 'info');
@@ -244,38 +255,33 @@ if (process.env.WORKER_ACTION) {
 
                     if (rawTxs.length > 0) {
                         const actualTxs = rawTxs.map(transformTransaction);
+                        log(`Merging ${actualTxs.length} transactions into "${matchedAccount.name}"...`, 'info');
                         const result = await actual.importTransactions(matchedAccount.id, actualTxs);
                         
                         const count = (result?.added?.length || 0) + (result?.updated?.length || 0);
                         if (count > 0) {
-                            log(`Synced ${count} txs to "${matchedAccount.name}"`, 'success');
+                            log(`✅ Successfully added ${count} new transactions.`, 'success');
                             totalImported += count;
+                        } else {
+                            log(`No new transactions to add (Duplicates ignored).`, 'info');
                         }
                     }
                 }
 
                 if (totalImported > 0) {
-                    log('Pushing changes to server...', 'info');
+                    log('Pushing new transactions to server...', 'info');
                     await actual.sync(); // Client push to server
-                    log(`Sync Complete. Total ${totalImported} transactions.`, 'success');
+                    log(`Sync Complete. Total ${totalImported} transactions added.`, 'success');
                 } else {
-                    log('Sync Complete. No new transactions found.', 'info');
+                    log('Sync Complete. No data changes needed.', 'info');
                 }
             }
 
         } catch (e) {
             let msg = e.message;
-            let finalMsg = msg;
             
-            // Refine message for UI
-            if (msg.includes('Could not get remote files')) {
-                finalMsg = `Auth Failed: Invalid Password OR Sync ID. (Server rejected download).`;
-            } else if (msg.includes('Download Failed')) {
-                finalMsg = `Auth/Sync Error: ${msg}`;
-            }
-            
-            log(`ERROR: ${finalMsg}`, 'error');
-            if (process.send) process.send({ type: 'result', success: false, message: finalMsg });
+            log(`ERROR: ${msg}`, 'error');
+            if (process.send) process.send({ type: 'result', success: false, message: msg });
             process.exit(1);
         } finally {
             try { await actual.shutdown(); } catch(e) {}
@@ -384,7 +390,7 @@ const runSync = async () => {
     }
 
     isProcessing = true;
-    addLog("Starting Isolated Sync Process...", "info");
+    addLog("Starting Isolated Transaction Merge...", "info");
     
     try {
         await spawnWorker('sync', config);

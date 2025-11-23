@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { AppConfig } from '../types';
-import { Save, Eye, EyeOff, Clock, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
+import { Save, Eye, EyeOff, Clock, CheckCircle, AlertCircle, Loader2, HelpCircle } from 'lucide-react';
 
 interface Props {
   config: AppConfig;
@@ -200,6 +200,10 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
                     className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-actual-500 outline-none text-slate-200"
                     placeholder="uuid (Settings > Advanced)"
                   />
+                  <div className="mt-1 flex gap-1 items-start text-[10px] text-slate-500">
+                    <HelpCircle size={10} className="mt-0.5" />
+                    <span>In Actual: Settings &gt; Advanced &gt; Sync ID. <strong>Must be "Remote" (Uploaded).</strong></span>
+                  </div>
                 </div>
                 <div>
                   <label className="block text-xs text-slate-400 mb-1 text-red-400 font-semibold">Encryption Password (Only if enabled)</label>
