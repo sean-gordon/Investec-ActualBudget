@@ -186,23 +186,23 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
                 placeholder="http://127.0.0.1:5006"
               />
               <p className="text-[10px] text-slate-500 mt-1">
-                <span className="text-yellow-500">Host Mode Active:</span> You are using the host network. Please use <code className="bg-slate-800 px-1 rounded text-slate-300">http://127.0.0.1:5006</code> to connect to Actual on the same machine.
+                <span className="text-yellow-500">Host Mode Active:</span> Use <code className="bg-slate-800 px-1 rounded text-slate-300">http://127.0.0.1:5006</code> or your local IP.
               </p>
             </div>
              <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Budget ID (Sync ID)</label>
+                  <label className="block text-xs text-slate-400 mb-1">Sync ID</label>
                   <input
                     name="actualBudgetId"
                     value={localConfig.actualBudgetId || ''}
                     onChange={handleChange}
                     type="text"
                     className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-actual-500 outline-none text-slate-200"
-                    placeholder="uuid"
+                    placeholder="uuid (Settings > Advanced)"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Password (Optional)</label>
+                  <label className="block text-xs text-slate-400 mb-1">Encryption / Server Password</label>
                   <input
                     name="actualPassword"
                     value={localConfig.actualPassword || ''}
@@ -211,6 +211,9 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
                     className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-actual-500 outline-none text-slate-200"
                   />
                 </div>
+             </div>
+             <div className="text-[10px] text-slate-500 bg-slate-950/50 p-2 rounded border border-slate-800">
+                <span className="font-bold text-slate-400">NOTE:</span> If your budget has <strong>End-to-End Encryption</strong> enabled, you MUST enter the <span className="text-white">File Password</span> here, NOT the Server Password. If it is NOT encrypted, use the Server Password.
              </div>
           </div>
         </div>

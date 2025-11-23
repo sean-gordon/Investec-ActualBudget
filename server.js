@@ -20,7 +20,7 @@ const ACTUAL_DATA_DIR = path.join(DATA_DIR, 'actual-data');
 // Fix for self-signed certs
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
-const SCRIPT_VERSION = "3.1.0 - Diagnostic Mode";
+const SCRIPT_VERSION = "3.2.0 - Deep Error Logs";
 
 // ==========================================
 // WORKER PROCESS LOGIC
@@ -153,7 +153,6 @@ if (process.env.WORKER_ACTION) {
                     }
                     log('Server reachable via HTTP.', 'success');
                 } catch (err) {
-                    // This catches ECONNREFUSED, Host Unreachable, etc.
                     throw new Error(`Network Error: Cannot reach ${serverUrl}. Is the server running? Details: ${err.message}`);
                 }
 
@@ -164,7 +163,15 @@ if (process.env.WORKER_ACTION) {
 
                 // 3. Download
                 log(`Downloading Budget: ${budgetId}...`, 'info');
-                await actual.downloadBudget(budgetId, { password: password || undefined });
+                
+                // NOTE: If the budget is E2E encrypted, 'password' must be the encryption password.
+                // If not encrypted but server is protected, 'password' might be used for server auth.
+                try {
+                    await actual.downloadBudget(budgetId, { password: password || undefined });
+                } catch (dlErr) {
+                    // Rethrow with more context
+                    throw new Error(`Download Failed. Code: ${dlErr.type || 'Unknown'}. Msg: ${dlErr.message}`);
+                }
 
                 if (action === 'test-actual') {
                     process.send({ type: 'result', success: true, message: "Connection verified! Budget downloaded." });
@@ -231,14 +238,15 @@ if (process.env.WORKER_ACTION) {
 
         } catch (e) {
             let msg = e.message;
-            // If we are here, it means the earlier HTTP Network Check PASSED. 
-            // So "Could not get remote files" now definitively means Auth/ID failure.
-            if (msg.includes('Could not get remote files')) {
-                msg = "Auth Failed: Invalid Password or Sync ID (Server rejected download).";
+            let finalMsg = msg;
+            
+            // Refine message for UI
+            if (msg.includes('Could not get remote files') || msg.includes('Download Failed')) {
+                finalMsg = `Auth Error: ${msg}. CHECK: If E2E Encryption is ON, use that password. If OFF, use Server Password.`;
             }
             
-            log(`ERROR: ${msg}`, 'error');
-            if (process.send) process.send({ type: 'result', success: false, message: msg });
+            log(`ERROR: ${finalMsg}`, 'error');
+            if (process.send) process.send({ type: 'result', success: false, message: finalMsg });
             process.exit(1);
         } finally {
             try { await actual.shutdown(); } catch(e) {}
