@@ -43,9 +43,9 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
-                clientId: localConfig.investecClientId,
-                secretId: localConfig.investecSecretId,
-                apiKey: localConfig.investecApiKey
+                investecClientId: localConfig.investecClientId,
+                investecSecretId: localConfig.investecSecretId,
+                investecApiKey: localConfig.investecApiKey
             })
         });
         const data = await res.json();
@@ -65,9 +65,9 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
-                serverUrl: localConfig.actualServerUrl,
-                budgetId: localConfig.actualBudgetId,
-                password: localConfig.actualPassword
+                actualServerUrl: localConfig.actualServerUrl,
+                actualBudgetId: localConfig.actualBudgetId,
+                actualPassword: localConfig.actualPassword
             })
         });
         const data = await res.json();
@@ -186,7 +186,7 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
                 placeholder="http://127.0.0.1:5006"
               />
               <p className="text-[10px] text-slate-500 mt-1">
-                <span className="text-yellow-500">Host Mode:</span> Use <code className="bg-slate-800 px-1 rounded text-slate-300">http://127.0.0.1:5006</code> or <code className="bg-slate-800 px-1 rounded text-slate-300">http://localhost:5006</code> since the container shares the host network.
+                <span className="text-yellow-500">Host Mode Active:</span> You are using the host network. Please use <code className="bg-slate-800 px-1 rounded text-slate-300">http://127.0.0.1:5006</code> to connect to Actual on the same machine.
               </p>
             </div>
              <div className="grid grid-cols-2 gap-4">
