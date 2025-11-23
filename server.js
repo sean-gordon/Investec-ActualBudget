@@ -27,7 +27,7 @@ const ACTUAL_DATA_DIR = path.join(DATA_DIR, 'actual-data');
 // Fix for self-signed certs
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
-const SCRIPT_VERSION = "3.7.0 - Re-Import Fix";
+const SCRIPT_VERSION = "3.8.0 - Input Sanitization";
 
 // ==========================================
 // WORKER PROCESS LOGIC
@@ -141,18 +141,27 @@ if (process.env.WORKER_ACTION) {
             // --- ACTION: TEST ACTUAL / SYNC ---
             if (action === 'test-actual' || action === 'sync') {
                 
+                // --- SANITIZATION ---
                 const rawUrl = payload.actualServerUrl || '';
-                const serverUrl = rawUrl.replace(/\/$/, ''); // Strip trailing slash
-                const password = payload.actualPassword;
-                const budgetId = payload.actualBudgetId;
+                const serverUrl = rawUrl.replace(/\/$/, '').trim(); 
+                const rawPass = payload.actualPassword || '';
+                const password = rawPass.trim();
+                const rawId = payload.actualBudgetId || '';
+                const budgetId = rawId.trim();
 
                 if (!serverUrl || !budgetId) {
                     throw new Error("Missing Server URL or Budget ID");
                 }
-                
-                // Debug Log (Masked)
+
+                // Debug Log (Masked & Length Checked)
                 const maskedPass = password ? `${password.substring(0,2)}***${password.slice(-2)}` : '(none)';
-                log(`Config: URL=${serverUrl} | ID=${budgetId.substring(0,8)}... | Pass=${maskedPass}`, 'info');
+                log(`Config: URL=${serverUrl} | ID_Len=${budgetId.length} | ID=${budgetId.substring(0,8)}...`, 'info');
+
+                // Validate UUID format (Simple regex)
+                const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+                if (!uuidRegex.test(budgetId)) {
+                    log(`⚠️ WARNING: Sync ID format looks incorrect. It should be a UUID.`, 'error');
+                }
 
                 // 1. HTTP Network Diagnostic (Application Level Check)
                 log(`Network Check: ${serverUrl}/info...`, 'info');
@@ -195,9 +204,8 @@ if (process.env.WORKER_ACTION) {
                             log(`⚠️ SUCCESS! Connected without password. Please CLEAR the password field in settings.`, 'success');
                         } catch (retryErr) {
                              log(`Retry failed: ${retryErr.message}`, 'error');
-                             // This is the most common error - specifically identify it
                              if (retryErr.message.includes('Could not get remote files')) {
-                                throw new Error(`SERVER ERROR: The server cannot find budget file "${budgetId}".\n\n⚠️ SOLUTION: Go to File > Close File > Import File > Actual (Zip). This will re-upload it to the server and give you a valid Sync ID.`);
+                                throw new Error(`SERVER ERROR: The server cannot find budget file "${budgetId}".\n\n⚠️ CHECK: Did you Import the file? Did you copy the NEW Sync ID? (See Help in Settings)`);
                              }
                              throw retryErr;
                         }
@@ -205,7 +213,7 @@ if (process.env.WORKER_ACTION) {
                         // Log raw error for debugging
                         log(`Raw API Error: ${JSON.stringify(dlErr, Object.getOwnPropertyNames(dlErr))}`, 'error');
                         if (dlErr.message.includes('Could not get remote files')) {
-                            throw new Error(`SERVER ERROR: The server cannot find budget file "${budgetId}".\n\n⚠️ SOLUTION: Go to File > Close File > Import File > Actual (Zip). This will re-upload it to the server and give you a valid Sync ID.`);
+                            throw new Error(`SERVER ERROR: The server cannot find budget file "${budgetId}".\n\n⚠️ CHECK: Did you Import the file? Did you copy the NEW Sync ID? (See Help in Settings)`);
                         }
                         throw new Error(`Download Failed. ${dlErr.message}`);
                     }

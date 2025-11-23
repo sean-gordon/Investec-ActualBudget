@@ -30,6 +30,12 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
     if (name.startsWith('actual')) setActualResult(null);
   };
 
+  const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    // Auto-trim input on blur to prevent whitespace errors
+    setLocalConfig(prev => ({ ...prev, [name]: value.trim() }));
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     onSave(localConfig);
@@ -122,6 +128,7 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
                 name="investecClientId"
                 value={localConfig.investecClientId || ''}
                 onChange={handleChange}
+                onBlur={handleBlur}
                 type="text"
                 className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-investec-500 outline-none text-slate-200"
                 placeholder="Client ID"
@@ -133,6 +140,7 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
                 name="investecSecretId"
                 value={localConfig.investecSecretId || ''}
                 onChange={handleChange}
+                onBlur={handleBlur}
                 type={showSecrets ? "text" : "password"}
                 className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-investec-500 outline-none text-slate-200"
                 placeholder="Secret"
@@ -144,6 +152,7 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
                 name="investecApiKey"
                 value={localConfig.investecApiKey || ''}
                 onChange={handleChange}
+                onBlur={handleBlur}
                 type={showSecrets ? "text" : "password"}
                 className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-investec-500 outline-none text-slate-200"
                 placeholder="API Key"
@@ -197,6 +206,7 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
                 name="actualServerUrl"
                 value={localConfig.actualServerUrl || ''}
                 onChange={handleChange}
+                onBlur={handleBlur}
                 type="text"
                 className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-actual-500 outline-none text-slate-200"
                 placeholder="http://127.0.0.1:5006"
@@ -212,6 +222,7 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
                     name="actualBudgetId"
                     value={localConfig.actualBudgetId || ''}
                     onChange={handleChange}
+                    onBlur={handleBlur}
                     type="text"
                     className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-actual-500 outline-none text-slate-200"
                     placeholder="uuid (Settings > Advanced)"
@@ -228,6 +239,7 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
                     name="actualPassword"
                     value={localConfig.actualPassword || ''}
                     onChange={handleChange}
+                    onBlur={handleBlur}
                     type="password"
                     className="w-full bg-slate-950 border border-red-900/50 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-red-500 outline-none text-slate-200"
                     placeholder="Leave EMPTY if no E2E"
@@ -251,6 +263,7 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
               name="syncSchedule"
               value={localConfig.syncSchedule || ''}
               onChange={handleChange}
+              onBlur={handleBlur}
               type="text"
               className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-slate-500 outline-none text-slate-200 font-mono"
               placeholder="0 0 * * *"
