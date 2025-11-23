@@ -186,15 +186,16 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
            {/* MISSING FILE ERROR HELP */}
            {!actualResult?.success && actualResult?.msg.includes("server cannot find budget file") && (
             <div className="bg-orange-950/40 border border-orange-800 p-3 rounded mb-4 text-xs">
-                <p className="font-bold text-orange-400 mb-1">Missing "Upload" button?</p>
+                <p className="font-bold text-orange-400 mb-1">Cannot find budget file?</p>
                 <p className="text-slate-300 mb-2">
-                    If your budget is Local but you don't see "Upload to Server", follow these steps to force it to the server:
+                    The server can't see this budget. To fix this:
                 </p>
                 <ol className="list-decimal pl-4 space-y-1 text-slate-400">
-                    <li>Go to <strong>Settings</strong> &gt; <strong>Export Data</strong> (Download the zip).</li>
-                    <li>Go to <strong>File Menu</strong> (top right) &gt; <strong>Close File</strong>.</li>
-                    <li>Click <strong>Import file</strong> &gt; <strong>Actual</strong> &gt; Select the zip.</li>
-                    <li>Open <strong>Settings</strong> &gt; <strong>Advanced</strong> &gt; Copy the <strong>NEW</strong> Sync ID.</li>
+                    <li>Open Actual in browser. Go to <strong>File</strong> &gt; <strong>Close File</strong>.</li>
+                    <li>If it says <strong>"Local"</strong>, you need to convert it:</li>
+                    <li>Open the file, go to <strong>Settings</strong> &gt; <strong>Export Data</strong> (Download Zip).</li>
+                    <li><strong>Close File</strong> again. Click <strong>Import file</strong> &gt; <strong>Actual</strong> &gt; Select the zip.</li>
+                    <li>This will make it "Remote". Copy the <strong>NEW</strong> Sync ID from Settings &gt; Advanced.</li>
                 </ol>
             </div>
            )}
@@ -228,9 +229,9 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
                     placeholder="uuid (Settings > Advanced)"
                   />
                   <div className="mt-2 text-[10px] text-slate-400 bg-black/20 p-2 rounded border border-slate-800">
-                    <p className="font-semibold text-slate-300 mb-1">Check Status:</p>
-                    <p className="mb-1">Go to <span className="text-white">Settings &gt; Advanced</span>.</p>
-                    <p>If status is "Local", refer to the help box above to Export/Import.</p>
+                    <p className="font-semibold text-slate-300 mb-1">Verification:</p>
+                    <p className="mb-1">Go to <span className="text-white">File Menu &gt; Close File</span>.</p>
+                    <p>It must say "Remote" under the filename, not "Local".</p>
                   </div>
                 </div>
                 <div>

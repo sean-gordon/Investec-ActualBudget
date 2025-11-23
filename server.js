@@ -27,7 +27,7 @@ const ACTUAL_DATA_DIR = path.join(DATA_DIR, 'actual-data');
 // Fix for self-signed certs
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
-const SCRIPT_VERSION = "3.8.0 - Input Sanitization";
+const SCRIPT_VERSION = "3.9.0 - Remote Status Check";
 
 // ==========================================
 // WORKER PROCESS LOGIC
@@ -205,7 +205,7 @@ if (process.env.WORKER_ACTION) {
                         } catch (retryErr) {
                              log(`Retry failed: ${retryErr.message}`, 'error');
                              if (retryErr.message.includes('Could not get remote files')) {
-                                throw new Error(`SERVER ERROR: The server cannot find budget file "${budgetId}".\n\n⚠️ CHECK: Did you Import the file? Did you copy the NEW Sync ID? (See Help in Settings)`);
+                                throw new Error(`SERVER ERROR: The server cannot find budget file "${budgetId}".\n\n⚠️ VERIFY STATUS: Go to "File > Close File" in Actual. Is the file "Local" or "Remote"?\nIf "Local", you must Export -> Close -> Import (Actual Zip) to make it Remote.`);
                              }
                              throw retryErr;
                         }
@@ -213,7 +213,7 @@ if (process.env.WORKER_ACTION) {
                         // Log raw error for debugging
                         log(`Raw API Error: ${JSON.stringify(dlErr, Object.getOwnPropertyNames(dlErr))}`, 'error');
                         if (dlErr.message.includes('Could not get remote files')) {
-                            throw new Error(`SERVER ERROR: The server cannot find budget file "${budgetId}".\n\n⚠️ CHECK: Did you Import the file? Did you copy the NEW Sync ID? (See Help in Settings)`);
+                            throw new Error(`SERVER ERROR: The server cannot find budget file "${budgetId}".\n\n⚠️ VERIFY STATUS: Go to "File > Close File" in Actual. Is the file "Local" or "Remote"?\nIf "Local", you must Export -> Close -> Import (Actual Zip) to make it Remote.`);
                         }
                         throw new Error(`Download Failed. ${dlErr.message}`);
                     }
