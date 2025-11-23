@@ -27,7 +27,7 @@ const ACTUAL_DATA_DIR = path.join(DATA_DIR, 'actual-data');
 // Fix for self-signed certs
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
-const SCRIPT_VERSION = "3.3.0 - IPv4 Fix & Debug";
+const SCRIPT_VERSION = "3.4.0 - Auto-Retry Auth";
 
 // ==========================================
 // WORKER PROCESS LOGIC
@@ -180,9 +180,24 @@ if (process.env.WORKER_ACTION) {
                     const finalPass = password && password.length > 0 ? password : undefined;
                     await actual.downloadBudget(budgetId, { password: finalPass });
                 } catch (dlErr) {
-                    // Log raw error for debugging
-                    log(`Raw API Error: ${JSON.stringify(dlErr, Object.getOwnPropertyNames(dlErr))}`, 'error');
-                    throw new Error(`Download Failed. ${dlErr.message}`);
+                    // RETRY LOGIC: If password was provided, try without it
+                    if (password && password.length > 0) {
+                        log(`First attempt failed. Retrying WITHOUT password (in case it was a login password)...`, 'info');
+                        try {
+                            cleanDataDir(); // Reset data again
+                            await actual.init({ dataDir: ACTUAL_DATA_DIR, serverURL: serverUrl }); // Re-init
+                            await actual.downloadBudget(budgetId); // No password
+                            log(`⚠️ SUCCESS! Connected without password. Please CLEAR the password field in settings.`, 'success');
+                        } catch (retryErr) {
+                             // If retry fails, throw the original error or the new one
+                             log(`Retry failed: ${retryErr.message}`, 'error');
+                             throw new Error(`Auth Failed. The server rejected the download. If you have E2E encryption, check the password. If not, clear the password.`);
+                        }
+                    } else {
+                        // Log raw error for debugging
+                        log(`Raw API Error: ${JSON.stringify(dlErr, Object.getOwnPropertyNames(dlErr))}`, 'error');
+                        throw new Error(`Download Failed. ${dlErr.message}`);
+                    }
                 }
 
                 if (action === 'test-actual') {

@@ -202,18 +202,19 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Encryption / Server Password</label>
+                  <label className="block text-xs text-slate-400 mb-1 text-red-400 font-semibold">Encryption Password (Only if enabled)</label>
                   <input
                     name="actualPassword"
                     value={localConfig.actualPassword || ''}
                     onChange={handleChange}
                     type="password"
-                    className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-actual-500 outline-none text-slate-200"
+                    className="w-full bg-slate-950 border border-red-900/50 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-red-500 outline-none text-slate-200"
+                    placeholder="Leave EMPTY if no E2E"
                   />
                 </div>
              </div>
              <div className="text-[10px] text-slate-500 bg-slate-950/50 p-2 rounded border border-slate-800">
-                <span className="font-bold text-slate-400">NOTE:</span> If your budget has <strong>End-to-End Encryption</strong> enabled, you MUST enter the <span className="text-white">File Password</span> here, NOT the Server Password. If it is NOT encrypted, use the Server Password.
+                <span className="font-bold text-red-400">WARNING:</span> This is NOT your user login password. Only enter a password here if you have enabled <strong>End-to-End Encryption</strong> for this specific budget file. If you haven't, <strong>leave this field empty</strong>.
              </div>
           </div>
         </div>
