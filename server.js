@@ -27,7 +27,7 @@ const ACTUAL_DATA_DIR = path.join(DATA_DIR, 'actual-data');
 // Fix for self-signed certs
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
-const SCRIPT_VERSION = "3.11.0 - Actual AI Logic Match";
+const SCRIPT_VERSION = "5.0.0 - Auto-Create Accounts";
 
 // ==========================================
 // WORKER PROCESS LOGIC
@@ -84,8 +84,9 @@ if (process.env.WORKER_ACTION) {
                 // We use postedOrder if it exists (0 is valid!). If not, we use description/amount.
                 const orderSuffix = (t.postedOrder !== undefined && t.postedOrder !== null) 
                     ? `:${t.postedOrder}` 
-                    : `:${Math.abs(amount)}`; // Fallback to amount if no order (less precise but safe)
+                    : `:${Math.abs(amount)}`; 
 
+                // We keep accountId in the ID so uniqueness is preserved across multiple source accounts
                 const importId = `${t.accountId}:${date}:${safeDesc}${orderSuffix}`;
 
                 return {
@@ -157,12 +158,6 @@ if (process.env.WORKER_ACTION) {
                 const maskedPass = password ? `${password.substring(0,2)}***${password.slice(-2)}` : '(none)';
                 log(`Config: URL=${serverUrl} | ID=${budgetId.substring(0,8)}... | Pass=${maskedPass}`, 'info');
 
-                // Validate UUID format
-                const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-                if (!uuidRegex.test(budgetId)) {
-                    log(`⚠️ WARNING: Sync ID format looks incorrect. It should be a UUID.`, 'error');
-                }
-
                 // 1. HTTP Network Diagnostic
                 log(`Network Check: ${serverUrl}/info...`, 'info');
                 try {
@@ -177,8 +172,6 @@ if (process.env.WORKER_ACTION) {
                 cleanDataDir();
                 log(`Initializing API Engine...`, 'info');
                 
-                // ACTUAL AI LOGIC MATCH:
-                // Pass password to init(). This authenticates the Server Session.
                 const initConfig = {
                     dataDir: ACTUAL_DATA_DIR,
                     serverURL: serverUrl,
@@ -191,12 +184,7 @@ if (process.env.WORKER_ACTION) {
                 log(`Fetching budget context...`, 'info');
                 
                 try {
-                    // ACTUAL AI LOGIC MATCH:
-                    // Do NOT pass password to downloadBudget initially.
-                    // The init() auth session handles the server permission.
-                    // We only need a password here if the FILE ITSELF is E2E encrypted.
                     await actual.downloadBudget(budgetId); 
-
                 } catch (dlErr) {
                     const errString = dlErr.toString().toLowerCase();
                     const isAuthError = errString.includes('invalid-password') || errString.includes('encryption');
@@ -208,10 +196,7 @@ if (process.env.WORKER_ACTION) {
                          } catch (retryErr) {
                              throw new Error(`Decryption Failed: ${retryErr.message}`);
                          }
-                    } else if (errString.includes('could not get remote files') || errString.includes('not found') || errString.includes('unknown error')) {
-                         // This specific error usually means the file doesn't exist on the server
-                         // despite the session being valid.
-                         log(`Raw Error: ${JSON.stringify(dlErr)}`, 'error');
+                    } else if (errString.includes('could not get remote files') || errString.includes('not found')) {
                          throw new Error(`SERVER ERROR: Budget file "${budgetId}" not found.\n\n⚠️ ACTION REQUIRED: Open Actual in browser -> File > Close File.\nVerify it says "Remote". If "Local", Export/Import to upload it.`);
                     } else {
                         throw dlErr;
@@ -237,22 +222,56 @@ if (process.env.WORKER_ACTION) {
                 const fromStr = startDate.toISOString().split('T')[0];
                 const toStr = endDate.toISOString().split('T')[0];
 
-                const actualAccounts = await actual.getAccounts();
+                let actualAccounts = await actual.getAccounts();
                 let totalImported = 0;
 
+                // --- ACCOUNT MAPPING LOOP ---
                 for (const invAcc of investecData.accounts) {
-                    const invName = invAcc.accountName;
-                    const matchedAccount = actualAccounts.find(a => 
-                        a.name.toLowerCase().trim() === invName.toLowerCase().trim() ||
-                        a.name.toLowerCase().includes(invName.toLowerCase())
+                    const invName = invAcc.accountName.trim();
+                    const invProduct = (invAcc.productName || "").toLowerCase();
+                    
+                    // 1. Find Account
+                    // Case-insensitive match on name
+                    let matchedAccount = actualAccounts.find(a => 
+                        a.name.toLowerCase().trim() === invName.toLowerCase()
                     );
 
+                    // 2. Auto-Create if missing
                     if (!matchedAccount) {
-                        log(`Skipping "${invName}" (No match in Actual)`, 'info');
+                        log(`Account "${invName}" does not exist. Creating...`, 'info');
+                        
+                        // Determine type based on product name
+                        let accType = 'checking'; // Default
+                        if (invProduct.includes('credit card') || invName.toLowerCase().includes('credit')) {
+                            accType = 'credit';
+                        }
+                        
+                        try {
+                            const newId = await actual.createAccount({
+                                name: invName,
+                                type: accType,
+                                offbudget: false
+                            });
+                            
+                            log(`✅ Created account: "${invName}" (ID: ${newId})`, 'success');
+                            
+                            // Refresh local list and update matchedAccount
+                            actualAccounts = await actual.getAccounts();
+                            matchedAccount = actualAccounts.find(a => a.id === newId);
+                        } catch (createErr) {
+                            log(`❌ Failed to create account "${invName}": ${createErr.message}`, 'error');
+                            continue; // Skip processing this account if we couldn't create it
+                        }
+                    }
+
+                    if (!matchedAccount) {
+                        log(`Skipping "${invName}" (Could not resolve account ID).`, 'error');
                         continue;
                     }
 
-                    // Get Txs
+                    log(`Processing: "${invName}" -> Actual: "${matchedAccount.name}"`, 'info');
+
+                    // 3. Fetch Transactions for this specific account
                     const txUrl = `${investecData.baseUrl}/za/pb/v1/accounts/${invAcc.accountId}/transactions?fromDate=${fromStr}&toDate=${toStr}`;
                     const txRes = await fetch(txUrl, {
                         headers: { 'Authorization': `Bearer ${investecData.token}`, 'Accept': 'application/json' },
@@ -262,23 +281,26 @@ if (process.env.WORKER_ACTION) {
 
                     if (rawTxs.length > 0) {
                         const actualTxs = rawTxs.map(transformTransaction);
-                        log(`Merging ${actualTxs.length} transactions into "${matchedAccount.name}"...`, 'info');
+                        log(`  Importing ${actualTxs.length} transactions...`, 'info');
+                        
                         const result = await actual.importTransactions(matchedAccount.id, actualTxs);
                         
                         const count = (result?.added?.length || 0) + (result?.updated?.length || 0);
                         if (count > 0) {
-                            log(`✅ Added ${count} new transactions.`, 'success');
+                            log(`  ✅ Added/Updated ${count} transactions.`, 'success');
                             totalImported += count;
                         } else {
-                            log(`No new transactions (Duplicates).`, 'info');
+                            log(`  No new transactions (Duplicates).`, 'info');
                         }
+                    } else {
+                        log(`  No transactions in date range.`, 'info');
                     }
                 }
 
                 if (totalImported > 0) {
-                    log('Pushing changes to server...', 'info');
+                    log('Pushing all changes to server...', 'info');
                     await actual.sync(); 
-                    log(`Sync Complete. Total ${totalImported} added.`, 'success');
+                    log(`Sync Complete. Total ${totalImported} added across all accounts.`, 'success');
                 } else {
                     log('Sync Complete. No data changes.', 'info');
                 }
@@ -391,7 +413,7 @@ const runSync = async () => {
     }
 
     isProcessing = true;
-    addLog("Starting Isolated Transaction Merge...", "info");
+    addLog("Starting Sync...", "info");
     
     try {
         await spawnWorker('sync', config);
@@ -432,4 +454,4 @@ app.listen(PORT, '0.0.0.0', () => {
     addLog(`System Online. v${SCRIPT_VERSION}`, 'success');
 });
 
-}
+} // End Main Process
