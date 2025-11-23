@@ -183,19 +183,17 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
              </div>
           )}
 
-           {/* MISSING FILE ERROR HELP */}
-           {!actualResult?.success && actualResult?.msg.includes("server cannot find budget file") && (
+           {/* ERROR HELP */}
+           {!actualResult?.success && actualResult?.msg.includes("SERVER ERROR") && (
             <div className="bg-orange-950/40 border border-orange-800 p-3 rounded mb-4 text-xs">
-                <p className="font-bold text-orange-400 mb-1">Cannot find budget file?</p>
+                <p className="font-bold text-orange-400 mb-1">Troubleshoot Connection</p>
                 <p className="text-slate-300 mb-2">
-                    The server can't see this budget. To fix this:
+                    If the ID is definitely correct, the file might not be on the server yet.
                 </p>
                 <ol className="list-decimal pl-4 space-y-1 text-slate-400">
-                    <li>Open Actual in browser. Go to <strong>File</strong> &gt; <strong>Close File</strong>.</li>
-                    <li>If it says <strong>"Local"</strong>, you need to convert it:</li>
-                    <li>Open the file, go to <strong>Settings</strong> &gt; <strong>Export Data</strong> (Download Zip).</li>
-                    <li><strong>Close File</strong> again. Click <strong>Import file</strong> &gt; <strong>Actual</strong> &gt; Select the zip.</li>
-                    <li>This will make it "Remote". Copy the <strong>NEW</strong> Sync ID from Settings &gt; Advanced.</li>
+                    <li>Go to Actual &gt; File Menu &gt; Close File.</li>
+                    <li>Verify the file says "Remote". If it says "Local", you must upload it.</li>
+                    <li>If "Upload" isn't available: Open &gt; Export (Zip) &gt; Close &gt; Import (Actual).</li>
                 </ol>
             </div>
            )}
@@ -228,27 +226,22 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
                     className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-actual-500 outline-none text-slate-200"
                     placeholder="uuid (Settings > Advanced)"
                   />
-                  <div className="mt-2 text-[10px] text-slate-400 bg-black/20 p-2 rounded border border-slate-800">
-                    <p className="font-semibold text-slate-300 mb-1">Verification:</p>
-                    <p className="mb-1">Go to <span className="text-white">File Menu &gt; Close File</span>.</p>
-                    <p>It must say "Remote" under the filename, not "Local".</p>
-                  </div>
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1 text-red-400 font-semibold">Encryption Password (Only if enabled)</label>
+                  <label className="block text-xs text-slate-400 mb-1 font-semibold">Server Password</label>
                   <input
                     name="actualPassword"
                     value={localConfig.actualPassword || ''}
                     onChange={handleChange}
                     onBlur={handleBlur}
                     type="password"
-                    className="w-full bg-slate-950 border border-red-900/50 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-red-500 outline-none text-slate-200"
-                    placeholder="Leave EMPTY if no E2E"
+                    className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-slate-500 outline-none text-slate-200"
+                    placeholder="Password"
                   />
-                  <div className="mt-2 text-[10px] text-slate-500 bg-slate-950/50 p-2 rounded border border-slate-800">
-                    <span className="font-bold text-red-400">WARNING:</span> NOT your login password. Only use if <strong>End-to-End Encryption</strong> is enabled. Otherwise leave empty.
-                  </div>
                 </div>
+             </div>
+             <div className="text-[10px] text-slate-500 bg-slate-950/50 p-2 rounded border border-slate-800">
+                <span className="font-bold text-slate-400">NOTE:</span> If your file uses End-to-End Encryption, this password field is also used for that.
              </div>
           </div>
         </div>

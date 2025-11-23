@@ -27,7 +27,7 @@ const ACTUAL_DATA_DIR = path.join(DATA_DIR, 'actual-data');
 // Fix for self-signed certs
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
-const SCRIPT_VERSION = "3.9.0 - Remote Status Check";
+const SCRIPT_VERSION = "3.11.0 - Actual AI Logic Match";
 
 // ==========================================
 // WORKER PROCESS LOGIC
@@ -155,77 +155,76 @@ if (process.env.WORKER_ACTION) {
 
                 // Debug Log (Masked & Length Checked)
                 const maskedPass = password ? `${password.substring(0,2)}***${password.slice(-2)}` : '(none)';
-                log(`Config: URL=${serverUrl} | ID_Len=${budgetId.length} | ID=${budgetId.substring(0,8)}...`, 'info');
+                log(`Config: URL=${serverUrl} | ID=${budgetId.substring(0,8)}... | Pass=${maskedPass}`, 'info');
 
-                // Validate UUID format (Simple regex)
+                // Validate UUID format
                 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
                 if (!uuidRegex.test(budgetId)) {
                     log(`⚠️ WARNING: Sync ID format looks incorrect. It should be a UUID.`, 'error');
                 }
 
-                // 1. HTTP Network Diagnostic (Application Level Check)
+                // 1. HTTP Network Diagnostic
                 log(`Network Check: ${serverUrl}/info...`, 'info');
                 try {
                     const infoRes = await fetch(`${serverUrl}/info`);
-                    if (!infoRes.ok) {
-                        const text = await infoRes.text();
-                        throw new Error(`Server returned ${infoRes.status}: ${text}`);
-                    }
-                    const infoData = await infoRes.json().catch(() => ({}));
-                    log(`Server reachable. Type: ${infoData.type || 'unknown'}`, 'success');
+                    if (!infoRes.ok) throw new Error(`Status ${infoRes.status}`);
+                    log(`Server reachable.`, 'success');
                 } catch (err) {
-                    throw new Error(`Network Error: Cannot reach ${serverUrl}. Is the server running? Details: ${err.message}`);
+                    throw new Error(`Network Error: Cannot reach ${serverUrl}. Details: ${err.message}`);
                 }
 
                 // 2. Clean Start
                 cleanDataDir();
                 log(`Initializing API Engine...`, 'info');
-                await actual.init({ dataDir: ACTUAL_DATA_DIR, serverURL: serverUrl });
                 
-                // FORCE: Set Server URL explicitly again to be absolutely sure
-                try { await actual.setServerURL(serverUrl); } catch(e) {}
-
+                // ACTUAL AI LOGIC MATCH:
+                // Pass password to init(). This authenticates the Server Session.
+                const initConfig = {
+                    dataDir: ACTUAL_DATA_DIR,
+                    serverURL: serverUrl,
+                    password: password && password.length > 0 ? password : undefined
+                };
+                
+                await actual.init(initConfig);
+                
                 // 3. Download
-                log(`Fetching budget context (Required for Transaction Merge)...`, 'info');
+                log(`Fetching budget context...`, 'info');
                 
                 try {
-                    // Password handling: "" should be passed as undefined
-                    const finalPass = password && password.length > 0 ? password : undefined;
-                    await actual.downloadBudget(budgetId, { password: finalPass });
+                    // ACTUAL AI LOGIC MATCH:
+                    // Do NOT pass password to downloadBudget initially.
+                    // The init() auth session handles the server permission.
+                    // We only need a password here if the FILE ITSELF is E2E encrypted.
+                    await actual.downloadBudget(budgetId); 
+
                 } catch (dlErr) {
-                    // RETRY LOGIC: If password was provided, try without it
-                    if (password && password.length > 0) {
-                        log(`First attempt failed. Retrying WITHOUT password...`, 'info');
-                        try {
-                            cleanDataDir(); // Reset data again
-                            await actual.init({ dataDir: ACTUAL_DATA_DIR, serverURL: serverUrl }); // Re-init
-                            try { await actual.setServerURL(serverUrl); } catch(e) {}
-                            await actual.downloadBudget(budgetId); // No password
-                            log(`⚠️ SUCCESS! Connected without password. Please CLEAR the password field in settings.`, 'success');
-                        } catch (retryErr) {
-                             log(`Retry failed: ${retryErr.message}`, 'error');
-                             if (retryErr.message.includes('Could not get remote files')) {
-                                throw new Error(`SERVER ERROR: The server cannot find budget file "${budgetId}".\n\n⚠️ VERIFY STATUS: Go to "File > Close File" in Actual. Is the file "Local" or "Remote"?\nIf "Local", you must Export -> Close -> Import (Actual Zip) to make it Remote.`);
-                             }
-                             throw retryErr;
-                        }
+                    const errString = dlErr.toString().toLowerCase();
+                    const isAuthError = errString.includes('invalid-password') || errString.includes('encryption');
+                    
+                    if (isAuthError && initConfig.password) {
+                         log(`File encrypted. Retrying with password...`, 'info');
+                         try {
+                             await actual.downloadBudget(budgetId, { password: initConfig.password });
+                         } catch (retryErr) {
+                             throw new Error(`Decryption Failed: ${retryErr.message}`);
+                         }
+                    } else if (errString.includes('could not get remote files') || errString.includes('not found') || errString.includes('unknown error')) {
+                         // This specific error usually means the file doesn't exist on the server
+                         // despite the session being valid.
+                         log(`Raw Error: ${JSON.stringify(dlErr)}`, 'error');
+                         throw new Error(`SERVER ERROR: Budget file "${budgetId}" not found.\n\n⚠️ ACTION REQUIRED: Open Actual in browser -> File > Close File.\nVerify it says "Remote". If "Local", Export/Import to upload it.`);
                     } else {
-                        // Log raw error for debugging
-                        log(`Raw API Error: ${JSON.stringify(dlErr, Object.getOwnPropertyNames(dlErr))}`, 'error');
-                        if (dlErr.message.includes('Could not get remote files')) {
-                            throw new Error(`SERVER ERROR: The server cannot find budget file "${budgetId}".\n\n⚠️ VERIFY STATUS: Go to "File > Close File" in Actual. Is the file "Local" or "Remote"?\nIf "Local", you must Export -> Close -> Import (Actual Zip) to make it Remote.`);
-                        }
-                        throw new Error(`Download Failed. ${dlErr.message}`);
+                        throw dlErr;
                     }
                 }
 
                 if (action === 'test-actual') {
-                    process.send({ type: 'result', success: true, message: "Connection verified! Ready to merge transactions." });
+                    process.send({ type: 'result', success: true, message: "Connection verified! Ready to sync." });
                     return;
                 }
 
                 // --- SYNC LOGIC ---
-                log('Actual Budget context loaded.', 'success');
+                log('Budget loaded. Starting Sync...', 'success');
                 
                 // Fetch Investec
                 log('Fetching Investec data...', 'info');
@@ -268,26 +267,25 @@ if (process.env.WORKER_ACTION) {
                         
                         const count = (result?.added?.length || 0) + (result?.updated?.length || 0);
                         if (count > 0) {
-                            log(`✅ Successfully added ${count} new transactions.`, 'success');
+                            log(`✅ Added ${count} new transactions.`, 'success');
                             totalImported += count;
                         } else {
-                            log(`No new transactions to add (Duplicates ignored).`, 'info');
+                            log(`No new transactions (Duplicates).`, 'info');
                         }
                     }
                 }
 
                 if (totalImported > 0) {
-                    log('Pushing new transactions to server...', 'info');
-                    await actual.sync(); // Client push to server
-                    log(`Sync Complete. Total ${totalImported} transactions added.`, 'success');
+                    log('Pushing changes to server...', 'info');
+                    await actual.sync(); 
+                    log(`Sync Complete. Total ${totalImported} added.`, 'success');
                 } else {
-                    log('Sync Complete. No data changes needed.', 'info');
+                    log('Sync Complete. No data changes.', 'info');
                 }
             }
 
         } catch (e) {
             let msg = e.message;
-            
             log(`ERROR: ${msg}`, 'error');
             if (process.send) process.send({ type: 'result', success: false, message: msg });
             process.exit(1);
@@ -315,9 +313,7 @@ const addLog = (message, type = 'info') => {
     const entry = { timestamp: Date.now(), message, type };
     logs.push(entry);
     if (logs.length > MAX_LOGS) logs.shift();
-    // Console output for Docker logs
-    const icon = type === 'success' ? '✅' : type === 'error' ? '❌' : 'ℹ️';
-    console.log(`${icon} ${message}`);
+    console.log(`${type === 'success' ? '✅' : type === 'error' ? '❌' : 'ℹ️'} ${message}`);
 };
 
 // --- CONFIG UTILS ---
@@ -374,20 +370,17 @@ app.get('/api/logs', (req, res) => res.json(logs));
 app.get('/api/config', (req, res) => res.json(loadConfig()));
 app.post('/api/config', (req, res) => { saveConfig(req.body); res.json({ status: 'ok' }); });
 
-// 1. TEST INVESTEC
 app.post('/api/test/investec', async (req, res) => {
     const result = await spawnWorker('test-investec', req.body);
     res.json(result);
 });
 
-// 2. TEST ACTUAL
 app.post('/api/test/actual', async (req, res) => {
     if (isProcessing) return res.json({ success: false, message: "Sync in progress" });
     const result = await spawnWorker('test-actual', req.body);
     res.json(result);
 });
 
-// 3. SYNC
 const runSync = async () => {
     if (isProcessing) { addLog("Sync skipped (already running)", "info"); return; }
     
@@ -412,11 +405,10 @@ const runSync = async () => {
 
 app.post('/api/sync', (req, res) => {
     if (isProcessing) return res.status(409).json({ status: 'busy' });
-    runSync(); // Fire and forget
+    runSync();
     res.json({ status: 'started' });
 });
 
-// --- CRON ---
 const setupCron = (schedule) => {
     if (currentTask) { currentTask.stop(); currentTask = null; }
     if (schedule && cron.validate(schedule)) {
@@ -425,7 +417,6 @@ const setupCron = (schedule) => {
     }
 };
 
-// --- INIT ---
 const initialConfig = loadConfig();
 setupCron(initialConfig.syncSchedule);
 
@@ -441,4 +432,4 @@ app.listen(PORT, '0.0.0.0', () => {
     addLog(`System Online. v${SCRIPT_VERSION}`, 'success');
 });
 
-} // End Main Process
+}
