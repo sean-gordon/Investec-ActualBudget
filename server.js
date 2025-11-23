@@ -20,7 +20,7 @@ const ACTUAL_DATA_DIR = path.join(DATA_DIR, 'actual-data');
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
 // VERSION TRACKING
-const SCRIPT_VERSION = "2.14.0 - Validated Sync";
+const SCRIPT_VERSION = "2.15.0 - Host Network";
 
 // --- Global Error Handlers ---
 process.on('uncaughtException', (err) => {
@@ -249,9 +249,9 @@ const transformTransaction = (t) => {
   const safeDesc = payee.replace(/[^a-z0-9]/gi, '').substring(0, 30);
   
   // 5. Imported ID: Must be unique but deterministic
-  // Format: accountId:date:amount:description_snippet
-  // We remove postedOrder because it can be null on pending transactions
-  const importId = `${t.accountId}:${date}:${amount}:${safeDesc}`;
+  // We use postedOrder if available (Investec stable order), otherwise fallback to composite
+  const orderInfo = t.postedOrder ? `:${t.postedOrder}` : '';
+  const importId = `${t.accountId}:${date}:${amount}:${safeDesc}${orderInfo}`;
 
   return {
     date: date,

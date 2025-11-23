@@ -183,10 +183,10 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
                 onChange={handleChange}
                 type="text"
                 className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-actual-500 outline-none text-slate-200"
-                placeholder="http://host.docker.internal:5006"
+                placeholder="http://127.0.0.1:5006"
               />
               <p className="text-[10px] text-slate-500 mt-1">
-                <span className="text-yellow-500">Docker Note:</span> Use <code className="bg-slate-800 px-1 rounded text-slate-300">http://host.docker.internal:5006</code> to access host services.
+                <span className="text-yellow-500">Host Mode:</span> Use <code className="bg-slate-800 px-1 rounded text-slate-300">http://127.0.0.1:5006</code> or <code className="bg-slate-800 px-1 rounded text-slate-300">http://localhost:5006</code> since the container shares the host network.
               </p>
             </div>
              <div className="grid grid-cols-2 gap-4">
