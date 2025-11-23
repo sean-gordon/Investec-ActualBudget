@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { AppConfig } from '../types';
-import { Save, Eye, EyeOff, Clock } from 'lucide-react';
+import { Save, Eye, EyeOff, Clock, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 
 interface Props {
   config: AppConfig;
@@ -10,6 +10,13 @@ interface Props {
 export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
   const [localConfig, setLocalConfig] = useState<AppConfig>(config);
   const [showSecrets, setShowSecrets] = useState(false);
+  
+  // Test States
+  const [testingInvestec, setTestingInvestec] = useState(false);
+  const [investecResult, setInvestecResult] = useState<{success: boolean, msg: string} | null>(null);
+  
+  const [testingActual, setTestingActual] = useState(false);
+  const [actualResult, setActualResult] = useState<{success: boolean, msg: string} | null>(null);
 
   useEffect(() => {
     setLocalConfig(config);
@@ -18,11 +25,58 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setLocalConfig(prev => ({ ...prev, [name]: value }));
+    // Clear test results when typing
+    if (name.startsWith('investec')) setInvestecResult(null);
+    if (name.startsWith('actual')) setActualResult(null);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     onSave(localConfig);
+  };
+
+  const testInvestec = async () => {
+    setTestingInvestec(true);
+    setInvestecResult(null);
+    try {
+        const res = await fetch('/api/test/investec', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                clientId: localConfig.investecClientId,
+                secretId: localConfig.investecSecretId,
+                apiKey: localConfig.investecApiKey
+            })
+        });
+        const data = await res.json();
+        setInvestecResult({ success: data.success, msg: data.message });
+    } catch (e) {
+        setInvestecResult({ success: false, msg: "Network Error" });
+    } finally {
+        setTestingInvestec(false);
+    }
+  };
+
+  const testActual = async () => {
+    setTestingActual(true);
+    setActualResult(null);
+    try {
+        const res = await fetch('/api/test/actual', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                serverUrl: localConfig.actualServerUrl,
+                budgetId: localConfig.actualBudgetId,
+                password: localConfig.actualPassword
+            })
+        });
+        const data = await res.json();
+        setActualResult({ success: data.success, msg: data.message });
+    } catch (e) {
+        setActualResult({ success: false, msg: "Network Error" });
+    } finally {
+        setTestingActual(false);
+    }
   };
 
   return (
@@ -39,8 +93,28 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
       </div>
 
       <div className="space-y-4">
+        {/* INVESTEC SECTION */}
         <div className="p-3 bg-slate-800/50 rounded-md border border-slate-700/50 mb-4">
-          <h3 className="text-investec-500 font-bold text-sm uppercase tracking-wider mb-2">Investec Credentials</h3>
+          <div className="flex justify-between items-center mb-2">
+            <h3 className="text-investec-500 font-bold text-sm uppercase tracking-wider">Investec Credentials</h3>
+            <button 
+                type="button" 
+                onClick={testInvestec} 
+                disabled={testingInvestec || !localConfig.investecClientId}
+                className="text-xs bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-white flex items-center gap-1 disabled:opacity-50"
+            >
+                {testingInvestec && <Loader2 size={10} className="animate-spin"/>}
+                Test Investec
+            </button>
+          </div>
+          
+          {investecResult && (
+             <div className={`text-xs p-2 rounded mb-2 flex items-start gap-2 ${investecResult.success ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}`}>
+                {investecResult.success ? <CheckCircle size={14} className="mt-0.5"/> : <AlertCircle size={14} className="mt-0.5"/>}
+                {investecResult.msg}
+             </div>
+          )}
+
           <div className="grid grid-cols-1 gap-4">
             <div>
               <label className="block text-xs text-slate-400 mb-1">Client ID</label>
@@ -78,8 +152,28 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
           </div>
         </div>
 
+        {/* ACTUAL SECTION */}
         <div className="p-3 bg-slate-800/50 rounded-md border border-slate-700/50">
-          <h3 className="text-actual-500 font-bold text-sm uppercase tracking-wider mb-2">Actual Budget Settings</h3>
+          <div className="flex justify-between items-center mb-2">
+            <h3 className="text-actual-500 font-bold text-sm uppercase tracking-wider">Actual Budget Settings</h3>
+             <button 
+                type="button" 
+                onClick={testActual} 
+                disabled={testingActual || !localConfig.actualServerUrl}
+                className="text-xs bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-white flex items-center gap-1 disabled:opacity-50"
+            >
+                {testingActual && <Loader2 size={10} className="animate-spin"/>}
+                Test Connection
+            </button>
+          </div>
+
+          {actualResult && (
+             <div className={`text-xs p-2 rounded mb-2 flex items-start gap-2 ${actualResult.success ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}`}>
+                {actualResult.success ? <CheckCircle size={14} className="mt-0.5"/> : <AlertCircle size={14} className="mt-0.5"/>}
+                {actualResult.msg}
+             </div>
+          )}
+
           <div className="grid grid-cols-1 gap-4">
              <div>
               <label className="block text-xs text-slate-400 mb-1">Server URL</label>
@@ -121,6 +215,7 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
           </div>
         </div>
 
+        {/* AUTOMATION */}
         <div className="p-3 bg-slate-800/50 rounded-md border border-slate-700/50">
           <h3 className="text-slate-400 font-bold text-sm uppercase tracking-wider mb-2 flex items-center gap-2">
             <Clock size={14} /> Automation

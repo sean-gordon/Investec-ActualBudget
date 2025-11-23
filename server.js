@@ -20,7 +20,7 @@ const ACTUAL_DATA_DIR = path.join(DATA_DIR, 'actual-data');
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
 // VERSION TRACKING
-const SCRIPT_VERSION = "2.13.0 - Server URL Fix";
+const SCRIPT_VERSION = "2.14.0 - Validated Sync";
 
 // --- Global Error Handlers ---
 process.on('uncaughtException', (err) => {
@@ -118,66 +118,9 @@ const saveConfig = (newConfig) => {
   setupCron(sanitizedConfig.syncSchedule);
 };
 
-// --- Logic ---
+// --- Helpers ---
 
-const getActualServerInfo = async (serverUrl) => {
-  try {
-    const response = await fetch(`${serverUrl}/mode`);
-    if (!response.ok) {
-      return { online: false, error: `HTTP ${response.status} - ${await response.text()}` };
-    }
-    const mode = await response.text();
-    return { online: true, mode };
-  } catch (e) {
-    return { online: false, error: e.message };
-  }
-};
-
-const resetActualState = async () => {
-  addLog('Performing HARD RESET of Actual API state...', 'info');
-  try { await actual.shutdown(); } catch(e) {}
-  isActualInitialized = false;
-  loadedBudgetId = null;
-  
-  // NUCLEAR OPTION: Completely wipe the data directory to remove corrupt state/locks
-  try {
-    if (fs.existsSync(ACTUAL_DATA_DIR)) {
-      fs.rmSync(ACTUAL_DATA_DIR, { recursive: true, force: true });
-    }
-    fs.mkdirSync(ACTUAL_DATA_DIR, { recursive: true });
-    addLog('Local data cache wiped clean.', 'success');
-  } catch (e) {
-    console.error("Failed to clean data dir:", e);
-    addLog(`Warning: Failed to clean cache: ${e.message}`, 'error');
-  }
-};
-
-const initActualApi = async (serverUrl) => {
-  ensureDataDir();
-  if (isActualInitialized) return;
-  
-  addLog(`Initializing Actual API Engine with URL: ${serverUrl}`, 'info');
-  try {
-    // Pre-seed the server URL to prevent "localhost" defaults
-    if (serverUrl) {
-        fs.writeFileSync(path.join(ACTUAL_DATA_DIR, 'server-url'), serverUrl);
-    }
-    
-    // CRITICAL FIX: Pass serverURL explicitly to init
-    await actual.init({ 
-      dataDir: ACTUAL_DATA_DIR,
-      serverURL: serverUrl 
-    });
-    
-    isActualInitialized = true;
-  } catch (e) {
-    addLog(`Failed to init Actual API: ${e.message}`, 'error');
-    try { await actual.shutdown(); } catch(err) {}
-    isActualInitialized = false;
-    throw e;
-  }
-};
-
+// Investec Auth
 const getInvestecToken = async (clientId, secretId, apiKey) => {
   const authString = `${clientId}:${secretId}`;
   const base64Auth = Buffer.from(authString).toString('base64');
@@ -195,7 +138,13 @@ const getInvestecToken = async (clientId, secretId, apiKey) => {
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`Investec Auth failed (${response.status}): ${text}`);
+    // Try to parse JSON error if possible
+    try {
+        const errJson = JSON.parse(text);
+        throw new Error(`Investec Auth: ${errJson.error_description || errJson.message || text}`);
+    } catch {
+        throw new Error(`Investec Auth failed (${response.status}): ${text}`);
+    }
   }
   const data = await response.json();
   return data.access_token;
@@ -223,31 +172,148 @@ const getTransactions = async (token, accountId, fromDate, toDate) => {
   return (data?.data?.transactions || []).map(t => ({ ...t, accountId }));
 };
 
+// Actual Budget Helpers
+const getActualServerInfo = async (serverUrl) => {
+  try {
+    const response = await fetch(`${serverUrl}/mode`);
+    if (!response.ok) {
+      return { online: false, error: `HTTP ${response.status} - ${await response.text()}` };
+    }
+    const mode = await response.text();
+    return { online: true, mode };
+  } catch (e) {
+    return { online: false, error: e.message };
+  }
+};
+
+const resetActualState = async () => {
+  try { await actual.shutdown(); } catch(e) {}
+  isActualInitialized = false;
+  loadedBudgetId = null;
+  
+  try {
+    if (fs.existsSync(ACTUAL_DATA_DIR)) {
+      fs.rmSync(ACTUAL_DATA_DIR, { recursive: true, force: true });
+    }
+    fs.mkdirSync(ACTUAL_DATA_DIR, { recursive: true });
+  } catch (e) {
+    console.error("Failed to clean data dir:", e);
+  }
+};
+
+const initActualApi = async (serverUrl) => {
+  ensureDataDir();
+  if (isActualInitialized) return;
+  
+  try {
+    if (serverUrl) {
+        fs.writeFileSync(path.join(ACTUAL_DATA_DIR, 'server-url'), serverUrl);
+    }
+    await actual.init({ 
+      dataDir: ACTUAL_DATA_DIR,
+      serverURL: serverUrl 
+    });
+    isActualInitialized = true;
+  } catch (e) {
+    try { await actual.shutdown(); } catch(err) {}
+    isActualInitialized = false;
+    throw e;
+  }
+};
+
+// --- Data Transformation ---
+// STRICT rules for Actual Budget import
 const transformTransaction = (t) => {
+  // 1. Amount: Actual uses integer Milliunits (e.g. 10.50 => 1050)
+  // Investec provides floats. 
   let amount = Math.round(t.amount * 100); 
-  if (t.type === 'DEBIT') amount = -Math.abs(amount);
-  else amount = Math.abs(amount);
   
-  const date = t.postingDate || t.transactionDate;
+  if (t.type === 'DEBIT') {
+    amount = -Math.abs(amount); // Expense
+  } else {
+    amount = Math.abs(amount); // Income
+  }
   
+  // 2. Date: ISO YYYY-MM-DD
+  const date = t.postingDate || t.transactionDate || t.actionDate;
+  
+  // 3. Notes
   const notesParts = [];
   if (t.transactionType) notesParts.push(`Type: ${t.transactionType}`);
   if (t.cardNumber) notesParts.push(`Ref: ${t.cardNumber}`);
   const notes = notesParts.join(' | ');
 
-  const safeDesc = (t.description || 'Unknown').replace(/[^a-z0-9 ]/gi, '').substring(0, 50);
-  const importId = `${t.accountId}:${t.postedOrder ?? 0}:${date}:${Math.abs(amount)}:${safeDesc}`;
+  // 4. Description
+  const payee = t.description || 'Unknown Payee';
+  // Clean description for ID generation to ensure stability
+  const safeDesc = payee.replace(/[^a-z0-9]/gi, '').substring(0, 30);
+  
+  // 5. Imported ID: Must be unique but deterministic
+  // Format: accountId:date:amount:description_snippet
+  // We remove postedOrder because it can be null on pending transactions
+  const importId = `${t.accountId}:${date}:${amount}:${safeDesc}`;
 
   return {
     date: date,
     amount: amount, 
-    payee_name: t.description || 'Unknown Payee',
-    imported_payee: t.description || 'Unknown Payee',
+    payee_name: payee,
+    imported_payee: payee,
     notes: notes,
     imported_id: importId, 
-    cleared: true,
+    cleared: true, // We assume bank API data is cleared
   };
 };
+
+// --- Routes ---
+
+// 1. TEST INVESTEC
+app.post('/api/test/investec', async (req, res) => {
+    const { clientId, secretId, apiKey } = req.body;
+    try {
+        const token = await getInvestecToken(clientId, secretId, apiKey);
+        const accounts = await getInvestecAccounts(token);
+        res.json({ 
+            success: true, 
+            message: `Connection Successful. Found ${accounts.length} accounts.` 
+        });
+    } catch (e) {
+        res.json({ success: false, message: e.message });
+    }
+});
+
+// 2. TEST ACTUAL
+app.post('/api/test/actual', async (req, res) => {
+    const { serverUrl, password, budgetId } = req.body;
+    
+    if (isProcessing) {
+        return res.json({ success: false, message: "System is busy running a sync. Wait for it to finish." });
+    }
+
+    try {
+        // 1. Network Check
+        const diag = await getActualServerInfo(serverUrl);
+        if (!diag.online) throw new Error(`Cannot reach server: ${diag.error}`);
+
+        // 2. Auth Check (Requires aggressive reset to not conflict with main process)
+        await resetActualState();
+        await initActualApi(serverUrl);
+        
+        await actual.downloadBudget(budgetId, {
+            password: password || undefined
+        });
+        
+        // Clean up immediately so we don't hold the lock
+        await resetActualState();
+        
+        res.json({ success: true, message: "Connection Successful. Budget downloaded & verified." });
+    } catch (e) {
+        await resetActualState(); // Ensure cleanup on failure
+        let msg = e.message;
+        if (msg.includes('Could not get remote files')) msg = "Invalid Sync ID or Password (or server refused connection).";
+        res.json({ success: false, message: msg });
+    }
+});
+
 
 const runSync = async () => {
   if (isProcessing) {
