@@ -14,7 +14,6 @@ export interface LogEntry {
   type: 'info' | 'error' | 'success';
 }
 
-// Investec Types
 export interface InvestecTokenResponse {
   access_token: string;
   token_type: string;
@@ -32,13 +31,13 @@ export interface InvestecAccount {
 
 export interface InvestecTransaction {
   accountId: string;
-  type: 'DEBIT' | 'CREDIT';
+  type: string;
   transactionType: string;
   status: string;
   description: string;
   cardNumber: string;
   postedOrder: number;
-  postingDate: string; // YYYY-MM-DD
+  postingDate: string;
   valueDate: string;
   actionDate: string;
   transactionDate: string;
@@ -46,14 +45,12 @@ export interface InvestecTransaction {
   runningBalance: number;
 }
 
-// Actual Budget Types
 export interface ActualTransaction {
-  date: string; // YYYY-MM-DD
-  amount: number; // integer, milliunits
-  payee_name?: string;
-  imported_payee?: string;
-  notes?: string;
-  imported_id: string; // Unique ID to prevent duplicates
-  account?: string; // Account ID mapping if needed
-  cleared?: boolean;
+  date: string;
+  amount: number;
+  payee_name: string;
+  imported_payee: string;
+  notes: string;
+  imported_id: string;
+  cleared: boolean;
 }

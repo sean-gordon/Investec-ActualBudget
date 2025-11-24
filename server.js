@@ -9,34 +9,58 @@ import { fork } from 'child_process';
 import * as actual from '@actual-app/api';
 import dns from 'dns';
 
+/**
+ * ============================================================================
+ * INVESTEC TO ACTUAL SYNC SERVER
+ * ============================================================================
+ * Architecture: "Split-Brain" / Worker Model
+ * 
+ * 1. Main Process: 
+ *    - Runs the Express Web Server (Port 46490).
+ *    - Serves the React Frontend.
+ *    - Manages Configuration (settings.json).
+ *    - Schedules Cron Jobs.
+ *    - Spawns Worker Processes.
+ * 
+ * 2. Worker Process:
+ *    - Spawns on demand (Sync or Test).
+ *    - Initializes the @actual-app/api.
+ *    - Connects to Investec.
+ *    - Performs the sync.
+ *    - EXITS immediately after finishing.
+ * 
+ * Why? The Actual Budget API is a Singleton and holds database locks. 
+ * Running it in a separate process ensures a 100% clean slate for every sync,
+ * preventing "Database Locked" or "Zombie Connection" errors.
+ */
+
 // --- NETWORK FIX ---
-// Node 17+ prefers IPv6. In Docker/Localhost environments, this often fails if 
-// the server listens on 127.0.0.1 (IPv4) but Node tries ::1.
+// Node 17+ prefers IPv6 resolution (::1). 
+// Docker containers often listen on IPv4 (127.0.0.1).
+// This forces Node to look for IPv4 first, solving "fetch failed" errors.
 if (dns.setDefaultResultOrder) {
     dns.setDefaultResultOrder('ipv4first');
 }
 
-// --- CONFIGURATION ---
+// --- CONSTANTS & PATHS ---
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PORT = process.env.PORT || 46490;
 const DATA_DIR = path.join(__dirname, 'data');
 const CONFIG_FILE = path.join(DATA_DIR, 'settings.json');
 const ACTUAL_DATA_DIR = path.join(DATA_DIR, 'actual-data');
+const SCRIPT_VERSION = "6.0.0 - Clean & Commented";
 
-// Fix for self-signed certs
+// Disable Self-Signed Cert Rejection (Needed for some local Actual instances)
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
-const SCRIPT_VERSION = "5.2.0 - Account Name Separation";
+// ============================================================================
+// PART 1: WORKER PROCESS (The Engine)
+// ============================================================================
+// This block executes ONLY when the script is spawned via child_process.fork()
 
-// ==========================================
-// WORKER PROCESS LOGIC
-// ==========================================
-// This block only runs when the script is spawned as a child process
 if (process.env.WORKER_ACTION) {
-    // Ensure TLS reject is disabled in worker too
-    process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-
+    // Log helper to send messages back to Parent Process
     const log = (msg, type = 'info') => {
         if (process.send) process.send({ type: 'log', message: msg, level: type });
     };
@@ -48,7 +72,11 @@ if (process.env.WORKER_ACTION) {
         try {
             log(`Worker started: ${action}`, 'info');
 
-            // --- HELPER: Database Cleanup ---
+            /**
+             * Helper: Database Cleanup
+             * Nukes the temporary Actual Budget data directory.
+             * This ensures no corrupted local files prevent the sync.
+             */
             const cleanDataDir = () => {
                 try {
                     if (fs.existsSync(ACTUAL_DATA_DIR)) {
@@ -60,49 +88,46 @@ if (process.env.WORKER_ACTION) {
                 }
             };
 
-            // --- HELPER: Transaction Transformation ---
+            /**
+             * Helper: Transaction Transformer
+             * Converts Investec API format to Actual Budget API format.
+             */
             const transformTransaction = (t) => {
-                // 1. Amount: Actual uses integer Milliunits (e.g. 10.50 => 1050)
+                // 1. Amount Conversion: Actual uses "Milliunits" (Integers).
+                // e.g., 10.50 becomes 1050.
                 let amount = Math.round(t.amount * 100);
                 if (t.type === 'DEBIT') amount = -Math.abs(amount);
                 else amount = Math.abs(amount);
 
-                // 2. Date Priority
-                // Credit cards often have transactionDate but no postingDate until cleared.
-                // We prefer transactionDate (when you bought it) over postingDate (when bank processed it).
+                // 2. Date Selection
+                // Priority: Transaction Date (Swipe) > Posting Date (Bank Process) > Action Date
                 let date = t.transactionDate || t.postingDate || t.actionDate;
                 
-                // Fallback / Validation
-                if (!date) {
-                    // Log warning if possible, but for map function we just return a valid date or null to filter later
-                    // If we return today's date, it confuses the user. better to skip? 
-                    // Let's use valueDate as last resort
-                    date = t.valueDate;
-                }
+                // Fallback: valueDate (Interest payments often only have this)
+                if (!date) date = t.valueDate;
                 
-                // Ensure YYYY-MM-DD
+                // Clean Date String (Remove Time if present)
                 if (date && date.includes('T')) {
                     date = date.split('T')[0];
                 }
 
-                // 3. Notes
+                // 3. Construct Notes
                 const notesParts = [];
                 if (t.transactionType) notesParts.push(`Type: ${t.transactionType}`);
                 if (t.cardNumber) notesParts.push(`Ref: ${t.cardNumber}`);
                 const notes = notesParts.join(' | ');
 
-                // 4. Description & ID
+                // 4. Construct Import ID (Deduplication Key)
                 const payee = t.description || 'Unknown Payee';
+                // Remove special chars for safer ID generation
                 const safeDesc = payee.replace(/[^a-z0-9]/gi, '').substring(0, 30);
                 
-                // CRITICAL: Deduplication Logic
-                // We use postedOrder if it exists (0 is valid!). If not, we use description/amount.
+                // "postedOrder" allows distinguishing multiple identical transactions on the same day.
                 const orderSuffix = (t.postedOrder !== undefined && t.postedOrder !== null) 
                     ? `:${t.postedOrder}` 
                     : `:${Math.abs(amount)}`; 
 
-                // We keep accountId in the ID so uniqueness is preserved across multiple source accounts
-                // Use a fallback for date in ID to prevent 'undefined' in string
+                // Format: AccountID : Date : Description : Order/Amount
                 const idDate = date || 'nodate'; 
                 const importId = `${t.accountId}:${idDate}:${safeDesc}${orderSuffix}`;
 
@@ -117,13 +142,17 @@ if (process.env.WORKER_ACTION) {
                 };
             };
 
-            // --- HELPER: Investec Fetch ---
+            /**
+             * Helper: Fetch Data from Investec
+             * Handles OAuth2 Token generation and Account list retrieval.
+             */
             const fetchInvestec = async (config) => {
                 const baseUrl = process.env.INVESTEC_BASE_URL || "https://openapi.investec.com";
                 
-                // 1. Auth
+                // A. Authenticate
                 const authString = `${config.investecClientId}:${config.investecSecretId}`;
                 const base64Auth = Buffer.from(authString).toString('base64');
+                
                 const authRes = await fetch(`${baseUrl}/identity/v2/oauth2/token`, {
                     method: 'POST',
                     headers: {
@@ -138,7 +167,7 @@ if (process.env.WORKER_ACTION) {
                 const authData = await authRes.json();
                 const token = authData.access_token;
 
-                // 2. Accounts
+                // B. Get Accounts
                 const accRes = await fetch(`${baseUrl}/za/pb/v1/accounts`, {
                     headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
                 });
@@ -149,17 +178,17 @@ if (process.env.WORKER_ACTION) {
             };
 
 
-            // --- ACTION: TEST INVESTEC ---
+            // --- WORKER ROUTE: TEST INVESTEC ---
             if (action === 'test-investec') {
                 const data = await fetchInvestec(payload);
                 process.send({ type: 'result', success: true, message: `Success! Found ${data.accounts.length} accounts.` });
                 return;
             }
 
-            // --- ACTION: TEST ACTUAL / SYNC ---
+            // --- WORKER ROUTE: SYNC / TEST ACTUAL ---
             if (action === 'test-actual' || action === 'sync') {
                 
-                // --- SANITIZATION ---
+                // Sanitize Inputs
                 const rawUrl = payload.actualServerUrl || '';
                 const serverUrl = rawUrl.replace(/\/$/, '').trim(); 
                 const rawPass = payload.actualPassword || '';
@@ -171,11 +200,11 @@ if (process.env.WORKER_ACTION) {
                     throw new Error("Missing Server URL or Budget ID");
                 }
 
-                // Debug Log (Masked & Length Checked)
+                // Log Config (Masked for security)
                 const maskedPass = password ? `${password.substring(0,2)}***${password.slice(-2)}` : '(none)';
                 log(`Config: URL=${serverUrl} | ID=${budgetId.substring(0,8)}... | Pass=${maskedPass}`, 'info');
 
-                // 1. HTTP Network Diagnostic
+                // 1. Network Diagnostic
                 log(`Network Check: ${serverUrl}/info...`, 'info');
                 try {
                     const infoRes = await fetch(`${serverUrl}/info`);
@@ -185,35 +214,43 @@ if (process.env.WORKER_ACTION) {
                     throw new Error(`Network Error: Cannot reach ${serverUrl}. Details: ${err.message}`);
                 }
 
-                // 2. Clean Start
+                // 2. Initialize Actual API
                 cleanDataDir();
                 log(`Initializing API Engine...`, 'info');
                 
+                // Config object for Actual Init
                 const initConfig = {
                     dataDir: ACTUAL_DATA_DIR,
                     serverURL: serverUrl,
                     password: password && password.length > 0 ? password : undefined
                 };
                 
+                // Initialize (Authenticates with Server)
                 await actual.init(initConfig);
                 
-                // 3. Download
+                // 3. Download Budget File
                 log(`Fetching budget context...`, 'info');
                 
                 try {
+                    // Try standard download (uses session from init)
                     await actual.downloadBudget(budgetId); 
                 } catch (dlErr) {
                     const errString = dlErr.toString().toLowerCase();
+                    
+                    // Handle Encryption / Auth Errors
                     const isAuthError = errString.includes('invalid-password') || errString.includes('encryption');
                     
                     if (isAuthError && initConfig.password) {
                          log(`File encrypted. Retrying with password...`, 'info');
                          try {
+                             // Retry with explicit password for E2E decryption
                              await actual.downloadBudget(budgetId, { password: initConfig.password });
                          } catch (retryErr) {
                              throw new Error(`Decryption Failed: ${retryErr.message}`);
                          }
-                    } else if (errString.includes('could not get remote files') || errString.includes('not found')) {
+                    } 
+                    // Handle Missing File Errors (Local vs Remote)
+                    else if (errString.includes('could not get remote files') || errString.includes('not found')) {
                          throw new Error(`SERVER ERROR: Budget file "${budgetId}" not found.\n\n⚠️ ACTION REQUIRED: Open Actual in browser -> File > Close File.\nVerify it says "Remote". If "Local", Export/Import to upload it.`);
                     } else {
                         throw dlErr;
@@ -225,33 +262,37 @@ if (process.env.WORKER_ACTION) {
                     return;
                 }
 
-                // --- SYNC LOGIC ---
+                // --- SYNC EXECUTION ---
                 log('Budget loaded. Starting Sync...', 'success');
                 
-                // Fetch Investec
+                // 4. Get Investec Data
                 log('Fetching Investec data...', 'info');
                 const investecData = await fetchInvestec(payload);
                 log(`Found ${investecData.accounts.length} bank accounts.`, 'info');
 
+                // 5. Set Time Range (Last 365 Days)
                 const endDate = new Date();
                 const startDate = new Date();
-                startDate.setFullYear(startDate.getFullYear() - 1); // 1 Year back
+                startDate.setFullYear(startDate.getFullYear() - 1); 
                 const fromStr = startDate.toISOString().split('T')[0];
                 const toStr = endDate.toISOString().split('T')[0];
 
                 let actualAccounts = await actual.getAccounts();
                 let totalImported = 0;
 
-                // --- ACCOUNT MAPPING LOOP ---
+                // 6. Iterate Accounts
                 for (const invAcc of investecData.accounts) {
-                    // ACCOUNT NAMING STRATEGY
-                    // Investec default behavior: referenceName is often set to accountName (Account Holder, e.g. "Mr SD Gordon").
-                    // If referenceName matches accountName (Account Holder), it's not unique enough.
-                    // We must force a unique name using Product Name + Last 4 digits.
-                    
-                    let uniqueName = `${invAcc.productName} ${invAcc.accountNumber.slice(-4)}`; // Default Fallback
+                    /**
+                     * Account Naming Strategy:
+                     * Investec defaults "Reference Name" to "Account Holder Name" if not set.
+                     * This causes collisions (e.g., 3 accounts named "Mr Smith").
+                     * 
+                     * Logic: 
+                     * 1. If ReferenceName exists AND is different from AccountName -> Use ReferenceName.
+                     * 2. Else -> Use "Product Name + Last 4 Digits" (e.g. "Private Bank Account 1234").
+                     */
+                    let uniqueName = `${invAcc.productName} ${invAcc.accountNumber.slice(-4)}`; 
 
-                    // Only use nickname if it exists and is NOT just the user's name
                     if (invAcc.referenceName && 
                         invAcc.referenceName.trim() !== '' && 
                         invAcc.referenceName.trim() !== invAcc.accountName.trim()) {
@@ -260,33 +301,27 @@ if (process.env.WORKER_ACTION) {
                     
                     uniqueName = uniqueName.trim();
 
-                    // Determine type based on product name
+                    // Determine Account Type (Checking vs Credit)
                     let accType = 'checking'; 
                     const prodNameLower = (invAcc.productName || "").toLowerCase();
-                    if (prodNameLower.includes('credit card') || prodNameLower.includes('private bank account') === false) { 
-                        // Simplified heuristic: if it says credit, it's credit. 
-                        if (prodNameLower.includes('credit')) accType = 'credit';
-                    }
+                    if (prodNameLower.includes('credit')) accType = 'credit';
                     
-                    // 1. Find Account in Actual
+                    // Find Account in Actual
                     let matchedAccount = actualAccounts.find(a => 
                         a.name.toLowerCase().trim() === uniqueName.toLowerCase()
                     );
 
-                    // 2. Auto-Create if missing
+                    // Auto-Create if missing
                     if (!matchedAccount) {
-                        log(`Account "${uniqueName}" (Investec) not found in Actual. Creating...`, 'info');
-                        
+                        log(`Account "${uniqueName}" not found in Actual. Creating...`, 'info');
                         try {
                             const newId = await actual.createAccount({
                                 name: uniqueName,
                                 type: accType,
                                 offbudget: false
                             });
-                            
                             log(`✅ Created account: "${uniqueName}"`, 'success');
-                            
-                            // Refresh local list and update matchedAccount
+                            // Refresh list
                             actualAccounts = await actual.getAccounts();
                             matchedAccount = actualAccounts.find(a => a.id === newId);
                         } catch (createErr) {
@@ -295,14 +330,9 @@ if (process.env.WORKER_ACTION) {
                         }
                     }
 
-                    if (!matchedAccount) {
-                        log(`Skipping "${uniqueName}" (Sync Error).`, 'error');
-                        continue;
-                    }
-
                     log(`Syncing: "${uniqueName}"`, 'info');
 
-                    // 3. Fetch Transactions for this specific account
+                    // Fetch Transactions
                     const txUrl = `${investecData.baseUrl}/za/pb/v1/accounts/${invAcc.accountId}/transactions?fromDate=${fromStr}&toDate=${toStr}`;
                     const txRes = await fetch(txUrl, {
                         headers: { 'Authorization': `Bearer ${investecData.token}`, 'Accept': 'application/json' },
@@ -311,16 +341,13 @@ if (process.env.WORKER_ACTION) {
                     const rawTxs = (txData?.data?.transactions || []).map(t => ({ ...t, accountId: invAcc.accountId }));
 
                     if (rawTxs.length > 0) {
+                        // Transform
                         const actualTxs = rawTxs
                             .map(transformTransaction)
-                            .filter(t => t.date); // Remove transactions where date failed to parse
+                            .filter(t => t.date); // Filter invalid dates
 
-                        if (actualTxs.length < rawTxs.length) {
-                             log(`  ⚠️ Skipped ${rawTxs.length - actualTxs.length} transactions due to missing dates.`, 'info');
-                        }
-
+                        // Import
                         log(`  Importing ${actualTxs.length} transactions...`, 'info');
-                        
                         const result = await actual.importTransactions(matchedAccount.id, actualTxs);
                         
                         const count = (result?.added?.length || 0) + (result?.updated?.length || 0);
@@ -335,6 +362,7 @@ if (process.env.WORKER_ACTION) {
                     }
                 }
 
+                // 7. Push to Server
                 if (totalImported > 0) {
                     log('Pushing changes to server...', 'info');
                     await actual.sync(); 
@@ -350,33 +378,37 @@ if (process.env.WORKER_ACTION) {
             if (process.send) process.send({ type: 'result', success: false, message: msg });
             process.exit(1);
         } finally {
+            // 8. Cleanup & Exit
             try { await actual.shutdown(); } catch(e) {}
             process.exit(0);
         }
     })();
 } else {
 
-// ==========================================
-// MAIN SERVER PROCESS
-// ==========================================
+// ============================================================================
+// PART 2: MAIN SERVER PROCESS (The Coordinator)
+// ============================================================================
+// This block runs the Express Server and manages scheduling.
 
 const app = express();
 
-// --- STATE ---
-let isProcessing = false;
+// --- STATE MANAGEMENT ---
+let isProcessing = false; // Prevents overlapping syncs
 let logs = [];
 let lastSyncTime = null;
 const MAX_LOGS = 100;
-let currentTask = null;
+let currentTask = null; // Cron task reference
 
+// --- LOGGER ---
 const addLog = (message, type = 'info') => {
     const entry = { timestamp: Date.now(), message, type };
     logs.push(entry);
     if (logs.length > MAX_LOGS) logs.shift();
+    // Print to Docker Console
     console.log(`${type === 'success' ? '✅' : type === 'error' ? '❌' : 'ℹ️'} ${message}`);
 };
 
-// --- CONFIG UTILS ---
+// --- CONFIG PERSISTENCE ---
 const ensureDataDir = () => {
     if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 };
@@ -394,6 +426,7 @@ const saveConfig = (cfg) => {
 };
 
 // --- WORKER SPAWNER ---
+// Creates an isolated child process for risky operations
 const spawnWorker = (action, payload) => {
     return new Promise((resolve) => {
         const child = fork(__filename, {
@@ -416,20 +449,26 @@ const spawnWorker = (action, payload) => {
     });
 };
 
-// --- ROUTES ---
+// --- API ROUTES ---
 app.use(cors());
 app.use(bodyParser.json());
 
+// Status Endpoint
 app.get('/api/status', (req, res) => res.json({ 
     isProcessing, 
     lastSyncTime, 
     version: SCRIPT_VERSION,
     budgetLoaded: !!loadConfig().actualBudgetId 
 }));
+
+// Logs Endpoint
 app.get('/api/logs', (req, res) => res.json(logs));
+
+// Configuration Endpoints
 app.get('/api/config', (req, res) => res.json(loadConfig()));
 app.post('/api/config', (req, res) => { saveConfig(req.body); res.json({ status: 'ok' }); });
 
+// Test Buttons
 app.post('/api/test/investec', async (req, res) => {
     const result = await spawnWorker('test-investec', req.body);
     res.json(result);
@@ -441,6 +480,7 @@ app.post('/api/test/actual', async (req, res) => {
     res.json(result);
 });
 
+// Sync Trigger
 const runSync = async () => {
     if (isProcessing) { addLog("Sync skipped (already running)", "info"); return; }
     
@@ -469,6 +509,7 @@ app.post('/api/sync', (req, res) => {
     res.json({ status: 'started' });
 });
 
+// --- CRON SCHEDULER ---
 const setupCron = (schedule) => {
     if (currentTask) { currentTask.stop(); currentTask = null; }
     if (schedule && cron.validate(schedule)) {
@@ -477,9 +518,11 @@ const setupCron = (schedule) => {
     }
 };
 
+// --- INITIALIZATION ---
 const initialConfig = loadConfig();
 setupCron(initialConfig.syncSchedule);
 
+// Serve Frontend
 app.use(express.static(path.join(__dirname, 'dist')));
 app.get('*', (req, res) => {
     const p = path.join(__dirname, 'dist', 'index.html');
@@ -487,6 +530,7 @@ app.get('*', (req, res) => {
     else res.send('Investec Sync Server Running (Build pending)');
 });
 
+// Start Server
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server v${SCRIPT_VERSION} listening on ${PORT}`);
     addLog(`System Online. v${SCRIPT_VERSION}`, 'success');
