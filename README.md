@@ -1,12 +1,12 @@
 # Investec to Actual Budget Sync
 
-A self-hosted dashboard to automatically synchronize transactions from Investec South Africa (OpenAPI) to Actual Budget.
+A self-hosted dashboard to automatically synchronise transactions from Investec South Africa (OpenAPI) to Actual Budget.
 
 ## Features
 
 *   **Secure Architecture**: Uses process isolation for every sync to prevent database locks.
 *   **Automatic Account Creation**: Automatically creates accounts in Actual Budget based on your Investec products (e.g., "Private Bank Account 1234").
-*   **Category Synchronization**: Define your master category list in the Settings UI. The system ensures these groups and categories exist in your budget.
+*   **Category Synchronisation**: Define your master category list in the Settings UI. The system ensures these groups and categories exist in your budget.
 *   **Smart Deduplication**: Prevents duplicate transactions even if run multiple times a day.
 *   **Transactions Only**: This tool merges transactions into your existing budget; it does not overwrite existing transaction data.
 
@@ -97,9 +97,9 @@ This feature allows you to define a standard set of Category Groups and Categori
 
 ---
 
-## Supercharge with Actual AI
+## 🤖 Supercharge with Actual AI
 
-To get the most out of your automated budget, I recommend pairing this Sync tool with **Actual AI**.
+To get the most out of your automated budget, we recommend pairing this Sync tool with **Actual AI**.
 
 While **Investec Sync** handles the reliable delivery of bank transactions into Actual, **Actual AI** uses Artificial Intelligence to automatically categorise those transactions, assign payees, and clean up descriptions.
 
@@ -107,7 +107,7 @@ While **Investec Sync** handles the reliable delivery of bank transactions into 
 
 **The Ultimate Flow:**
 1.  **Investec Sync** -> Downloads transactions -> Pushes to Actual.
-2.  **Actual AI** -> Detects new transactions -> Categorizes them automatically.
+2.  **Actual AI** -> Detects new transactions -> Categorises them automatically.
 
 ---
 
@@ -128,6 +128,6 @@ This usually means your Sync ID is correct, but the file doesn't exist on the se
 
 ### Accounts Merging Incorrectly
 The system tries to match accounts by name.
-*   It prioritizes your Investec **Reference Name** (Nickname).
+*   It prioritises your Investec **Reference Name** (Nickname).
 *   If that is missing or matches the account holder name, it uses **Product Name + Last 4 Digits**.
 *   To fix merging issues, give your accounts distinct nicknames in Investec Online Banking.

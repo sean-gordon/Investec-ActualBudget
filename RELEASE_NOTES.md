@@ -1,23 +1,24 @@
-# Release v6.0.0 - Major Stability & Architecture Update
+# Release v6.1.1 - Category Management & UK Localisation
 
 ## 🚀 Key Highlights
-This release introduces a complete architectural rewrite of the synchronization engine ("Split-Brain" model), resolving persistent connection issues, database locks, and account merging errors.
-
-### 🛠 Major Fixes
-*   **Process Isolation**: The sync engine now runs in a separate "Worker Process" for every action. This eliminates "Database Locked" errors and ensures a clean memory state for every sync.
-*   **Authentication Overhaul**: Fixed connection logic to match the official Actual AI implementation. Now correctly handles Server Passwords vs. End-to-End Encryption passwords, solving the "Could not get remote files" error on password-protected servers.
-*   **Account Separation**: Fixed a bug where multiple Investec accounts were merging into one under the account holder's name. Accounts are now uniquely identified by your Investec Reference Name (Nickname) or Product Name + Last 4 Digits.
+This release introduces powerful new tools for managing your budget structure and aligns the application with British English standards.
 
 ### ✨ New Features
+*   **Category Management**: You can now define a master list of Category Groups and Categories in the Settings UI.
+    *   **Additive Sync**: The system checks your budget during every sync. If a category is missing, it is automatically created. Existing categories are never deleted or modified.
+    *   **JSON Editor**: Easily configure your tree structure directly in the dashboard.
+*   **Actual AI Integration**: Documentation added for integrating with **Actual AI** to automate transaction categorisation after syncing.
+
+### 🛠 Major Fixes & Improvements
+*   **UK English Localisation**: Updated all logs, comments, and documentation to British English (e.g., *Synchronisation*, *Initialise*).
+*   **Process Isolation**: The sync engine runs in a separate "Worker Process" for every action to prevent database locks and ensure memory stability.
+*   **Authentication Overhaul**: Fixed connection logic to match the official Actual AI implementation. Now correctly handles Server Passwords vs End-to-End Encryption passwords, resolving "Could not get remote files" errors.
+*   **Account Separation**: Fixed a bug where multiple Investec accounts were merging into one. Accounts are now uniquely identified by your Investec Reference Name (Nickname) or Product Name + Last 4 Digits.
 *   **Automatic Account Creation**: If an Investec account doesn't exist in Actual, it is automatically created with the correct type (Checking/Credit).
-*   **Smart Date Logic**: Transaction dates now prioritize the "Swipe Date" (Transaction Date) over the "Posting Date" for better budgeting accuracy.
-*   **Test Buttons**: New independent "Test Investec" and "Test Actual" buttons in Settings to verify credentials separately.
-*   **Troubleshooting UI**: Added built-in guides for resolving "Local vs Remote" file issues directly in the dashboard.
 
 ### 🐳 Docker & Networking
+*   **SSL Support**: Added native SSL libraries (`openssl`, `ca-certificates`) to the container to ensure robust secure connections to Investec and self-hosted servers.
 *   **IPv4 Enforcement**: Fixed Node.js connection failures to `localhost` inside Docker.
-*   **SSL Support**: Added native SSL libraries (`openssl`, `ca-certificates`) to the container to ensure robust secure connections to banking APIs.
-*   **Host Networking**: Optimized for `network_mode: host` for easier local configuration.
 
 ## 📦 Upgrade Instructions
 
@@ -26,7 +27,7 @@ This release introduces a complete architectural rewrite of the synchronization 
     git pull
     ```
 
-2.  **Rebuild the container** (Required for SSL and Permission fixes):
+2.  **Rebuild the container** (Required for new features):
     ```bash
     docker compose up -d --build
     ```

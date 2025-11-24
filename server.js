@@ -24,7 +24,7 @@ import dns from 'dns';
  * 
  * 2. Worker Process:
  *    - Spawns on demand (Sync or Test).
- *    - Initializes the @actual-app/api.
+ *    - Initialises the @actual-app/api.
  *    - Connects to Investec.
  *    - Syncs Categories (Creates Groups/Categories if missing).
  *    - Syncs Transactions.
@@ -44,7 +44,7 @@ const DATA_DIR = path.join(__dirname, 'data');
 const CONFIG_FILE = path.join(DATA_DIR, 'settings.json');
 const CATEGORIES_FILE = path.join(DATA_DIR, 'categories.json');
 const ACTUAL_DATA_DIR = path.join(DATA_DIR, 'actual-data');
-const SCRIPT_VERSION = "6.1.0 - Category Sync";
+const SCRIPT_VERSION = "6.1.1 - UK English Update";
 
 // Disable Self-Signed Cert Rejection
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
@@ -208,7 +208,7 @@ if (process.env.WORKER_ACTION) {
                 
                 // Refetch categories to ensure cache is up to date for any other ops
                 if (groupsCreated > 0 || catsCreated > 0) {
-                    log(`Categories Synced: Created ${groupsCreated} Groups and ${catsCreated} Categories.`, 'success');
+                    log(`Categories Synchronised: Created ${groupsCreated} Groups and ${catsCreated} Categories.`, 'success');
                 } else {
                     log('Categories up to date.', 'info');
                 }
@@ -310,7 +310,7 @@ if (process.env.WORKER_ACTION) {
                 }
 
                 cleanDataDir();
-                log(`Initializing API Engine...`, 'info');
+                log(`Initialising API Engine...`, 'info');
                 
                 const initConfig = {
                     dataDir: ACTUAL_DATA_DIR,
