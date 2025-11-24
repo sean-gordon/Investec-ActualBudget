@@ -6,8 +6,9 @@ A self-hosted dashboard to automatically synchronize transactions from Investec 
 
 *   **Secure Architecture**: Uses process isolation for every sync to prevent database locks.
 *   **Automatic Account Creation**: Automatically creates accounts in Actual Budget based on your Investec products (e.g., "Private Bank Account 1234").
+*   **Category Synchronization**: Define your master category list in the Settings UI. The system ensures these groups and categories exist in your budget.
 *   **Smart Deduplication**: Prevents duplicate transactions even if run multiple times a day.
-*   **Transactions Only**: This tool merges transactions into your existing budget; it does not overwrite categories or rules.
+*   **Transactions Only**: This tool merges transactions into your existing budget; it does not overwrite existing transaction data.
 
 ---
 
@@ -51,13 +52,13 @@ The app will start on port **46490**.
 1.  Open your browser and go to `http://localhost:46490` (or your server IP).
 2.  Click the **Settings** (Gear icon) in the top right.
 
-### Investec Settings
+### 1. Investec Credentials
 You need to apply for "Programmable Banking" access in your Investec Online Banking.
 *   **Client ID**: Provided by Investec.
 *   **Secret ID**: Provided by Investec.
 *   **API Key**: The API key you generated in the Programmable Banking portal.
 
-### Actual Budget Settings
+### 2. Actual Budget Settings
 *   **Server URL**: Usually `http://127.0.0.1:5006` (if using Host Mode).
 *   **Sync ID**: Found in Actual Budget under **Settings > Advanced Settings**.
     *   *Important*: Ensure your budget is "Remote" (uploaded), not "Local". Check this via **File > Close File** in Actual Budget.
@@ -65,7 +66,31 @@ You need to apply for "Programmable Banking" access in your Investec Online Bank
     *   If your file has **End-to-End Encryption**, enter the File Password.
     *   If no encryption, but the server has a password, enter the Server Password.
 
-### Automation
+### 3. Category Management
+This feature allows you to define a standard set of Category Groups and Categories.
+*   **How it works**: When a Sync runs, the system checks if these Groups and Categories exist in your Actual Budget.
+*   **Additive Only**: If a category is missing, it is **created**. If a category already exists, it is left alone. The system **never deletes** categories from your budget.
+*   **How to Edit**:
+    1.  In Settings, find the **Category Management** section.
+    2.  Click **Edit** to reveal the JSON editor.
+    3.  The format is `"Group Name": ["Category 1", "Category 2"]`.
+    4.  Modify the list as needed and click **Save Configuration**.
+
+**Example Structure:**
+```json
+{
+  "🏠 Housing": [
+    "Rent",
+    "Utilities"
+  ],
+  "🚗 Transport": [
+    "Fuel",
+    "Insurance"
+  ]
+}
+```
+
+### 4. Automation
 *   **Cron Schedule**: Enter a cron expression to automate syncing.
     *   Run once a day at midnight: `0 0 * * *`
     *   Run every 6 hours: `0 */6 * * *`
