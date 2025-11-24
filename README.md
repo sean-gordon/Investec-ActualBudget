@@ -14,9 +14,16 @@ A self-hosted dashboard to automatically synchronise transactions from Investec 
 
 ---
 
-## Prerequisite: Docker
+## Prerequisites
 
+Before installing this sync tool, ensure you have the following:
+
+### 1. Docker
 You must have Docker and Docker Compose installed on your machine or server.
+
+### 2. Actual Budget
+You need a running instance of **Actual Budget** (Self-Hosted). This tool syncs data *to* your Actual Budget instance.
+*   **Get Actual Budget**: [Official Installation Guide](https://actualbudget.org/docs/install/)
 
 ---
 
