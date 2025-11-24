@@ -111,6 +111,61 @@ While **Investec Sync** handles the reliable delivery of bank transactions into 
 
 ---
 
+## Advanced: Docker Network Setup
+
+By default, this project uses `network_mode: "host"` for simplicity. However, if you prefer to run it on a shared internal Docker network with Actual Budget, follow these steps:
+
+### 1. Create the Network
+Run this command to create a bridge network:
+```bash
+docker network create actual_network
+```
+
+### 2. Update Actual Budget
+Modify the `docker-compose.yml` for your **Actual Budget** container to join this network:
+
+```yaml
+services:
+  actual_server:
+    container_name: actual_server
+    # ... other settings ...
+    networks:
+      - actual_network
+
+networks:
+  actual_network:
+    external: true
+```
+
+### 3. Update Investec Sync
+Modify the `docker-compose.yml` in this folder (`Investec-ActualBudget`).
+1.  **Remove** the line `network_mode: "host"`.
+2.  **Add** the network configuration:
+
+```yaml
+services:
+  investec-sync:
+    build: .
+    # REMOVED: network_mode: "host"
+    networks:
+      - actual_network
+    volumes:
+      - ./data:/app/data
+    environment:
+      - NODE_ENV=production
+
+networks:
+  actual_network:
+    external: true
+```
+
+### 4. Update Settings Configuration
+In the Investec Sync Web UI settings:
+*   Change **Server URL** to: `http://actual_server:5006`
+*   *(Note: "actual_server" matches the `container_name` or service name defined in step 2)*.
+
+---
+
 ## Troubleshooting
 
 ### "Could not get remote files" / "Server cannot find budget file"
