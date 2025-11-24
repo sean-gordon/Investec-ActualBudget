@@ -10,8 +10,6 @@ A self-hosted dashboard to automatically synchronise transactions from Investec 
 *   **Smart Deduplication**: Prevents duplicate transactions even if run multiple times a day.
 *   **Transactions Only**: This tool merges transactions into your existing budget; it does not overwrite existing transaction data.
 
-<img width="1535" height="612" alt="image" src="https://github.com/user-attachments/assets/7b0231de-0e0b-4427-bc11-e22fac3fb8de" />
-
 ---
 
 ## Prerequisites
