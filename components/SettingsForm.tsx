@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { AppConfig } from '../types';
-import { Save, Eye, EyeOff, Clock, CheckCircle, AlertCircle, Loader2, HelpCircle } from 'lucide-react';
+import { AppConfig, CategoryTree } from '../types';
+import { Save, Eye, EyeOff, Clock, CheckCircle, AlertCircle, Loader2, ListTree } from 'lucide-react';
 
 interface Props {
   config: AppConfig;
@@ -18,8 +18,18 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
   const [testingActual, setTestingActual] = useState(false);
   const [actualResult, setActualResult] = useState<{success: boolean, msg: string} | null>(null);
 
+  // Category State
+  const [categoryJson, setCategoryJson] = useState<string>('');
+  const [categoryError, setCategoryError] = useState<string | null>(null);
+  const [showCategories, setShowCategories] = useState(false);
+
   useEffect(() => {
     setLocalConfig(config);
+    // Fetch categories on mount
+    fetch('/api/categories')
+        .then(res => res.json())
+        .then(data => setCategoryJson(JSON.stringify(data, null, 2)))
+        .catch(console.error);
   }, [config]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -32,12 +42,27 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
 
   const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    // Auto-trim input on blur to prevent whitespace errors
     setLocalConfig(prev => ({ ...prev, [name]: value.trim() }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Validate Categories
+    try {
+        const parsedCats = JSON.parse(categoryJson);
+        setCategoryError(null);
+        // Save Categories
+        await fetch('/api/categories', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(parsedCats)
+        });
+    } catch (err) {
+        setCategoryError("Invalid JSON format in Categories");
+        return; // Stop save if invalid
+    }
+
     onSave(localConfig);
   };
 
@@ -210,9 +235,6 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
                 className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-actual-500 outline-none text-slate-200"
                 placeholder="http://127.0.0.1:5006"
               />
-              <p className="text-[10px] text-slate-500 mt-1">
-                <span className="text-yellow-500">Host Mode Active:</span> Use <code className="bg-slate-800 px-1 rounded text-slate-300">http://127.0.0.1:5006</code> or your local IP.
-              </p>
             </div>
              <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -228,7 +250,7 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1 font-semibold">Server Password</label>
+                  <label className="block text-xs text-slate-400 mb-1 font-semibold">Server / Encryption Password</label>
                   <input
                     name="actualPassword"
                     value={localConfig.actualPassword || ''}
@@ -240,10 +262,34 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
                   />
                 </div>
              </div>
-             <div className="text-[10px] text-slate-500 bg-slate-950/50 p-2 rounded border border-slate-800">
-                <span className="font-bold text-slate-400">NOTE:</span> If your file uses End-to-End Encryption, this password field is also used for that.
-             </div>
           </div>
+        </div>
+        
+        {/* CATEGORY SECTION */}
+        <div className="p-3 bg-slate-800/50 rounded-md border border-slate-700/50">
+             <div className="flex justify-between items-center mb-2 cursor-pointer" onClick={() => setShowCategories(!showCategories)}>
+                 <h3 className="text-slate-400 font-bold text-sm uppercase tracking-wider flex items-center gap-2">
+                    <ListTree size={14} /> Category Management
+                 </h3>
+                 <span className="text-xs text-slate-500">{showCategories ? 'Hide' : 'Edit'}</span>
+             </div>
+             
+             {showCategories && (
+                 <div className="mt-2">
+                     <p className="text-[10px] text-slate-400 mb-2">
+                         Edit the JSON below to configure categories. These will be created in Actual Budget automatically during the next Sync.
+                         <br/><span className="text-yellow-500">Note:</span> This is additive only. Deleting here will NOT delete from Actual.
+                     </p>
+                     {categoryError && (
+                         <div className="text-xs text-red-400 mb-2">{categoryError}</div>
+                     )}
+                     <textarea
+                        value={categoryJson}
+                        onChange={(e) => setCategoryJson(e.target.value)}
+                        className="w-full h-64 bg-slate-950 border border-slate-700 rounded p-2 text-xs font-mono text-green-400 focus:outline-none focus:border-investec-500"
+                     />
+                 </div>
+             )}
         </div>
 
         {/* AUTOMATION */}

@@ -8,6 +8,10 @@ export interface AppConfig {
   syncSchedule: string; // Cron expression
 }
 
+export interface CategoryTree {
+  [groupName: string]: string[];
+}
+
 export interface LogEntry {
   timestamp: number;
   message: string;
