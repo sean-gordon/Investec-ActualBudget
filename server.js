@@ -49,7 +49,7 @@ const PORT = process.env.PORT || 46490;
 const DATA_DIR = path.join(__dirname, 'data');
 const CONFIG_FILE = path.join(DATA_DIR, 'settings.json');
 const ACTUAL_DATA_DIR = path.join(DATA_DIR, 'actual-data');
-const SCRIPT_VERSION = "6.0.0 - Clean & Commented";
+const SCRIPT_VERSION = "0.6.0 - Beta Release";
 
 // Disable Self-Signed Cert Rejection (Needed for some local Actual instances)
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
