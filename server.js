@@ -27,7 +27,7 @@ const ACTUAL_DATA_DIR = path.join(DATA_DIR, 'actual-data');
 // Fix for self-signed certs
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
-const SCRIPT_VERSION = "5.1.0 - Account Separation Fix";
+const SCRIPT_VERSION = "5.2.0 - Account Name Separation";
 
 // ==========================================
 // WORKER PROCESS LOGIC
@@ -245,13 +245,19 @@ if (process.env.WORKER_ACTION) {
                 // --- ACCOUNT MAPPING LOOP ---
                 for (const invAcc of investecData.accounts) {
                     // ACCOUNT NAMING STRATEGY
-                    // 1. Use Reference Name (User Nickname) if available
-                    // 2. Use Product Name + Last 4 digits if no Reference Name
-                    // This prevents "Mr SD Gordon" (accountName) from merging all 3 accounts
-                    let uniqueName = invAcc.referenceName;
-                    if (!uniqueName || uniqueName.trim() === '') {
-                         uniqueName = `${invAcc.productName} ${invAcc.accountNumber.slice(-4)}`;
+                    // Investec default behavior: referenceName is often set to accountName (Account Holder, e.g. "Mr SD Gordon").
+                    // If referenceName matches accountName (Account Holder), it's not unique enough.
+                    // We must force a unique name using Product Name + Last 4 digits.
+                    
+                    let uniqueName = `${invAcc.productName} ${invAcc.accountNumber.slice(-4)}`; // Default Fallback
+
+                    // Only use nickname if it exists and is NOT just the user's name
+                    if (invAcc.referenceName && 
+                        invAcc.referenceName.trim() !== '' && 
+                        invAcc.referenceName.trim() !== invAcc.accountName.trim()) {
+                        uniqueName = invAcc.referenceName;
                     }
+                    
                     uniqueName = uniqueName.trim();
 
                     // Determine type based on product name
