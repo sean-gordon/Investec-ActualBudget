@@ -97,6 +97,20 @@ This feature allows you to define a standard set of Category Groups and Categori
 
 ---
 
+## Supercharge with Actual AI
+
+To get the most out of your automated budget, I recommend pairing this Sync tool with **Actual AI**.
+
+While **Investec Sync** handles the reliable delivery of bank transactions into Actual, **Actual AI** uses Artificial Intelligence to automatically categorise those transactions, assign payees, and clean up descriptions.
+
+*   **Get Actual AI here:** [https://github.com/sakowicz/actual-ai](https://github.com/sakowicz/actual-ai)
+
+**The Ultimate Flow:**
+1.  **Investec Sync** -> Downloads transactions -> Pushes to Actual.
+2.  **Actual AI** -> Detects new transactions -> Categorizes them automatically.
+
+---
+
 ## Troubleshooting
 
 ### "Could not get remote files" / "Server cannot find budget file"
