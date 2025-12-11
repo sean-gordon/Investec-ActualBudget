@@ -33,6 +33,9 @@ RUN apt-get update && apt-get install -y python3 make g++ git openssl ca-certifi
     apt-get update && apt-get install -y docker-ce-cli && \
     rm -rf /var/lib/apt/lists/*
 
+# Fix for "dubious ownership" error when /app is mounted from host
+RUN git config --global --add safe.directory /app
+
 # Copy package files
 COPY package.json package-lock.json* ./
 
