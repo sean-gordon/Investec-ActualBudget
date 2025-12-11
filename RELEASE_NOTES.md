@@ -1,3 +1,20 @@
+# Release v6.2.0 - Auto-Update & Version Control
+
+## 🚀 Key Highlights
+This release introduces a self-update mechanism, making it easier than ever to keep your sync tool running with the latest features and fixes.
+
+### ✨ New Features
+*   **Auto-Update System**: You can now update the application directly from the dashboard.
+    *   **Version Check**: The system automatically checks against the official GitHub repository for new releases.
+    *   **One-Click Update**: If a new version is available, a pulsing "Update Available" button appears in the header. Clicking it will pull the latest code and rebuild the container automatically.
+*   **Live Version Status**: The dashboard header now displays your current server version and connection status in real-time.
+
+### 🛠 Improvements
+*   **Version Visibility**: Added API endpoints to expose the running version to the frontend.
+*   **System Stability**: The update process safely restarts the service, ensuring configuration files remain intact.
+
+---
+
 # Release v6.1.1 - Category Management & UK Localisation
 
 ## 🚀 Key Highlights

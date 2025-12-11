@@ -9,6 +9,7 @@ A self-hosted dashboard to automatically synchronise transactions from Investec 
 *   **Category Synchronisation**: Define your master category list in the Settings UI. The system ensures these groups and categories exist in your budget.
 *   **Smart Deduplication**: Prevents duplicate transactions even if run multiple times a day.
 *   **Transactions Only**: This tool merges transactions into your existing budget; it does not overwrite existing transaction data.
+*   **Auto-Update System**: Easily update to the latest version directly from the dashboard with a single click.
 
 ---
 
@@ -51,6 +52,25 @@ docker compose up -d --build
 ```
 
 The app will start on port **46490**.
+
+---
+
+## Updates & Maintenance
+
+Keeping the application up-to-date is simple.
+
+### Method 1: Automatic Update (Recommended)
+1.  Open the dashboard.
+2.  If a new version is available, an **Update Available** button will appear in the top header.
+3.  Click the button. The system will pull the latest code and rebuild itself automatically.
+
+### Method 2: Manual Update
+Run the following commands in your terminal inside the project folder:
+
+```bash
+git pull
+docker compose up -d --build
+```
 
 ---
 
