@@ -49,19 +49,6 @@ const SCRIPT_VERSION = "6.2.2 - Git Host Path Support";
 // Disable Self-Signed Cert Rejection
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
-// --- STARTUP CHECKS ---
-setTimeout(() => {
-    // Check if we just switched branches
-    const config = loadConfig();
-    exec('git rev-parse --abbrev-ref HEAD', { cwd: __dirname }, (err, stdout) => {
-        if (!err && stdout) {
-            const currentBranch = stdout.trim();
-            // You might want to store the 'target' branch in a temp file or just log the current one
-            addLog(`System startup complete. Active Branch: ${currentBranch}`, 'success');
-        }
-    });
-}, 5000); // Wait for server to fully initialize
-
 // --- DEFAULT CATEGORIES ---
 const DEFAULT_CATEGORIES = {
   "🏠 Home & Living": [
@@ -805,6 +792,18 @@ app.get('*', (req, res) => {
     if (fs.existsSync(p)) res.sendFile(p);
     else res.send('Investec Sync Server Running (Build pending)');
 });
+
+// --- STARTUP CHECKS ---
+setTimeout(() => {
+    // Check if we just switched branches
+    const config = loadConfig();
+    exec('git rev-parse --abbrev-ref HEAD', { cwd: __dirname }, (err, stdout) => {
+        if (!err && stdout) {
+            const currentBranch = stdout.trim();
+            addLog(`System startup complete. Active Branch: ${currentBranch}`, 'success');
+        }
+    });
+}, 5000); // Wait for server to fully initialize
 
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server v${SCRIPT_VERSION} listening on ${PORT}`);
