@@ -1,0 +1,8 @@
+services:
+  investec-sync:
+    build: .
+    network_mode: "host"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - NODE_ENV=production

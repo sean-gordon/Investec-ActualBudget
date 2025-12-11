@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Investec to Actual Sync</title>
+    <!-- Runtime Environment Variables for Docker -->
+    <script src="/env-config.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              investec: {
+                900: '#1e293b',
+                800: '#334155',
+                500: '#facc15', // Yellow accent
+              },
+              actual: {
+                500: '#6366f1', // Indigo
+              }
+            }
+          }
+        }
+      }
+    </script>
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.554.0",
+    "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.1.1",
+    "vite": "https://aistudiocdn.com/vite@^7.2.4",
+    "cors": "https://aistudiocdn.com/cors@^2.8.5",
+    "express": "https://aistudiocdn.com/express@^5.1.0",
+    "fs": "https://aistudiocdn.com/fs@^0.0.1-security",
+    "url": "https://aistudiocdn.com/url@^0.11.4",
+    "path": "https://aistudiocdn.com/path@^0.12.7",
+    "body-parser": "https://aistudiocdn.com/body-parser@^2.2.0",
+    "node-cron": "https://aistudiocdn.com/node-cron@^4.2.1",
+    "@actual-app/api": "https://aistudiocdn.com/@actual-app/api@^25.11.0",
+    "child_process": "https://aistudiocdn.com/child_process@^1.0.2",
+    "net": "https://aistudiocdn.com/net@^1.0.2",
+    "dns": "https://aistudiocdn.com/dns@^0.2.2"
+  }
+}
+</script>
+</head>
+  <body class="bg-slate-950 text-slate-100 antialiased h-screen overflow-hidden">
+    <div id="root" class="h-full w-full"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>
