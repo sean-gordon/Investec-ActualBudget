@@ -682,6 +682,45 @@ app.get('/api/git/current', (req, res) => {
     })();
 });
 
+app.get('/api/git/status', (req, res) => {
+    (async () => {
+        const getHash = (cmd) => new Promise(resolve => {
+            exec(cmd, { cwd: __dirname }, (err, stdout) => resolve(stdout ? stdout.trim() : null));
+        });
+
+        // 1. Get current branch
+        let branch = await getHash('git rev-parse --abbrev-ref HEAD');
+        if (!branch || branch === 'HEAD') {
+             // Fallback for detached head
+             const allBranches = await getHash('git branch -r --contains HEAD');
+             if (allBranches) {
+                 const match = allBranches.split('\n')
+                    .map(b => b.trim().replace('origin/', ''))
+                    .find(b => !b.includes('HEAD'));
+                 if (match) branch = match;
+             }
+        }
+        
+        if (!branch) return res.json({ updateAvailable: false, branch: 'unknown' });
+
+        // 2. Fetch latest info from remote (without merging)
+        await getHash('git fetch origin ' + branch);
+
+        // 3. Compare hashes
+        const localHash = await getHash('git rev-parse HEAD');
+        const remoteHash = await getHash(`git rev-parse origin/${branch}`);
+
+        const updateAvailable = localHash && remoteHash && localHash !== remoteHash;
+
+        res.json({ 
+            branch, 
+            localHash, 
+            remoteHash, 
+            updateAvailable 
+        });
+    })();
+});
+
 app.post('/api/git/switch', (req, res) => {
     const { branch } = req.body;
     // Validate branch name to prevent command injection

@@ -20,6 +20,7 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
   const [currentBranch, setCurrentBranch] = useState<string>('unknown');
   const [selectedBranch, setSelectedBranch] = useState<string>('');
   const [isSwitching, setIsSwitching] = useState(false);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
 
   useEffect(() => {
     setFormData(config);
@@ -43,13 +44,22 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
         })
         .catch(console.error);
 
-    fetch('/api/git/current')
-        .then(res => res.json())
-        .then(data => {
-            setCurrentBranch(data.branch);
-            setSelectedBranch(data.branch);
-        })
-        .catch(console.error);
+    const checkGitStatus = () => {
+        fetch('/api/git/status')
+            .then(res => res.json())
+            .then(data => {
+                setCurrentBranch(data.branch);
+                // Only set selected if it hasn't been touched yet (or matches previous current)
+                setSelectedBranch(prev => prev === '' || prev === data.branch ? data.branch : prev);
+                setUpdateAvailable(data.updateAvailable);
+            })
+            .catch(console.error);
+    };
+
+    checkGitStatus();
+    // Poll every 5 minutes
+    const interval = setInterval(checkGitStatus, 5 * 60 * 1000);
+    return () => clearInterval(interval);
   }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -76,7 +86,13 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
 
   const handleBranchSwitch = async () => {
     if (!selectedBranch) return;
-    if (!confirm(`Are you sure you want to switch to branch "${selectedBranch}"?\n\nThe server will rebuild and restart.`)) return;
+    
+    let msg = `Are you sure you want to switch to branch "${selectedBranch}"?\n\nThe server will rebuild and restart.`;
+    if (selectedBranch === currentBranch && updateAvailable) {
+        msg = `Ready to upgrade branch "${selectedBranch}" to the latest version?\n\nThe server will pull changes and rebuild.`;
+    }
+    
+    if (!confirm(msg)) return;
     
     setIsSwitching(true);
     try {
@@ -85,11 +101,11 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ branch: selectedBranch })
         });
-        alert('Switch process started. Page will reload in 15 seconds.');
+        alert('Process started. Page will reload in 15 seconds.');
         setTimeout(() => window.location.reload(), 15000);
     } catch (e) {
         setIsSwitching(false);
-        alert('Failed to switch branch.');
+        alert('Failed to trigger git operation.');
     }
   };
 
@@ -134,20 +150,38 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
                 </div>
                 <p className="text-xs text-slate-500">
                     Current Branch: <span className="font-mono text-orange-400">{currentBranch}</span>
+                    {updateAvailable && <span className="ml-2 text-green-400 font-bold">(Update Available)</span>}
                 </p>
             </div>
-            <div>
+            
+            {/* Stability Warning */}
+            {selectedBranch && selectedBranch !== 'main' && selectedBranch !== currentBranch && (
+                <div className="md:col-span-2 bg-yellow-900/20 border border-yellow-700/50 p-3 rounded-lg flex items-center gap-3">
+                    <div className="text-yellow-500">⚠️</div>
+                    <p className="text-sm text-yellow-200">
+                        <strong>Stability Warning:</strong> You are switching to a development branch (`{selectedBranch}`). 
+                        This may contain experimental features or bugs. Use with caution.
+                    </p>
+                </div>
+            )}
+
+            <div className="md:col-span-2 flex justify-end">
                 <button
                     onClick={handleBranchSwitch}
-                    disabled={isSwitching || selectedBranch === currentBranch}
+                    disabled={isSwitching || (selectedBranch === currentBranch && !updateAvailable)}
                     className={`flex items-center gap-2 px-6 py-2 rounded-lg font-bold transition-all ${
-                        isSwitching || selectedBranch === currentBranch
+                        isSwitching || (selectedBranch === currentBranch && !updateAvailable)
                         ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                        : 'bg-orange-600 hover:bg-orange-500 text-white'
+                        : selectedBranch === currentBranch && updateAvailable
+                            ? 'bg-green-600 hover:bg-green-500 text-white animate-pulse'
+                            : 'bg-orange-600 hover:bg-orange-500 text-white'
                     }`}
                 >
                     <GitBranch size={18} />
-                    {isSwitching ? 'Switching...' : 'Switch & Rebuild'}
+                    {isSwitching ? 'Processing...' : 
+                        selectedBranch === currentBranch && updateAvailable ? 'Upgrade Branch' : 
+                        'Switch & Rebuild'
+                    }
                 </button>
             </div>
         </div>
