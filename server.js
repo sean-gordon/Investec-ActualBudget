@@ -635,10 +635,38 @@ app.get('/api/git/branches', async (req, res) => {
 });
 
 app.get('/api/git/current', (req, res) => {
-    exec('git rev-parse --abbrev-ref HEAD', { cwd: __dirname }, (err, stdout) => {
-        if (err) return res.json({ branch: 'unknown' });
-        res.json({ branch: stdout.trim() });
+    const getBranch = (cmd) => new Promise(resolve => {
+        exec(cmd, { cwd: __dirname }, (err, stdout) => {
+            if (err || !stdout) resolve(null);
+            else resolve(stdout.trim());
+        });
     });
+
+    (async () => {
+        // Method 1: Standard git command
+        let branch = await getBranch('git rev-parse --abbrev-ref HEAD');
+        
+        // Method 2: If we are in detached HEAD (e.g., CI or specific checkout), try getting ref name
+        if (!branch || branch === 'HEAD') {
+             const headRef = await getBranch('git symbolic-ref -q HEAD');
+             if (headRef) branch = headRef.replace('refs/heads/', '');
+        }
+
+        // Method 3: Check remotes to see what commit we are on
+        if (!branch || branch === 'HEAD') {
+             const hash = await getBranch('git rev-parse HEAD');
+             const allBranches = await getBranch('git branch -r --contains ' + hash);
+             if (allBranches) {
+                 // Clean up output like "origin/Dev", "origin/HEAD -> origin/main"
+                 const match = allBranches.split('\n')
+                    .map(b => b.trim().replace('origin/', ''))
+                    .find(b => !b.includes('HEAD'));
+                 if (match) branch = match;
+             }
+        }
+
+        res.json({ branch: branch || 'unknown' });
+    })();
 });
 
 app.post('/api/git/switch', (req, res) => {
