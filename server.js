@@ -480,7 +480,14 @@ const ensureDataDir = () => {
 const loadConfig = () => {
     ensureDataDir();
     if (fs.existsSync(CONFIG_FILE)) {
-        try { return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8')); } catch (e) {}
+        try { 
+            return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8')); 
+        } catch (e) {
+            console.error(`Failed to load config from ${CONFIG_FILE}:`, e.message);
+            addLog(`Config Load Error: ${e.message}`, 'error');
+        }
+    } else {
+        console.log(`Config file not found at: ${CONFIG_FILE}`);
     }
     return {};
 };
