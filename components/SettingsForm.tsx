@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Save, Eye, EyeOff, RotateCcw } from 'lucide-react';
+import { Save, Eye, EyeOff, RotateCcw, GitBranch } from 'lucide-react';
 import { AppConfig, CategoryTree } from '../types';
 
 interface SettingsFormProps {
@@ -14,13 +14,19 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
   const [jsonError, setJsonError] = useState<string | null>(null);
   const [jsonText, setJsonText] = useState('');
   const [isEditingCats, setIsEditingCats] = useState(false);
+  
+  // Git State
+  const [branches, setBranches] = useState<string[]>([]);
+  const [currentBranch, setCurrentBranch] = useState<string>('unknown');
+  const [selectedBranch, setSelectedBranch] = useState<string>('');
+  const [isSwitching, setIsSwitching] = useState(false);
 
   useEffect(() => {
     setFormData(config);
   }, [config]);
 
   useEffect(() => {
-    // Fetch categories on mount
+    // Fetch categories
     fetch('/api/categories')
       .then(res => res.json())
       .then(data => {
@@ -28,6 +34,22 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
         setJsonText(JSON.stringify(data, null, 2));
       })
       .catch(console.error);
+      
+    // Fetch Git Info
+    fetch('/api/git/branches')
+        .then(res => res.json())
+        .then(data => {
+            if (Array.isArray(data)) setBranches(data);
+        })
+        .catch(console.error);
+
+    fetch('/api/git/current')
+        .then(res => res.json())
+        .then(data => {
+            setCurrentBranch(data.branch);
+            setSelectedBranch(data.branch);
+        })
+        .catch(console.error);
   }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -52,8 +74,70 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
     }
   };
 
+  const handleBranchSwitch = async () => {
+    if (!selectedBranch) return;
+    if (!confirm(`Are you sure you want to switch to branch "${selectedBranch}"?\n\nThe server will rebuild and restart.`)) return;
+    
+    setIsSwitching(true);
+    try {
+        await fetch('/api/git/switch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ branch: selectedBranch })
+        });
+        alert('Switch process started. Page will reload in 15 seconds.');
+        setTimeout(() => window.location.reload(), 15000);
+    } catch (e) {
+        setIsSwitching(false);
+        alert('Failed to switch branch.');
+    }
+  };
+
   return (
     <div className="space-y-8 animate-fade-in">
+
+      {/* Git Branch Management */}
+      <section className="bg-slate-900 p-6 rounded-xl border border-slate-800">
+        <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+          <div className="w-1 h-6 bg-orange-500 rounded-full"></div>
+          Git Repository Control
+        </h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-end">
+            <div className="space-y-2">
+                <label className="text-sm text-slate-400">Target Branch</label>
+                <div className="relative">
+                    <select
+                        value={selectedBranch}
+                        onChange={(e) => setSelectedBranch(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-orange-500 outline-none transition-all appearance-none"
+                        disabled={isSwitching}
+                    >
+                        {branches.map(b => (
+                            <option key={b} value={b}>{b}</option>
+                        ))}
+                    </select>
+                    <GitBranch size={16} className="absolute right-3 top-3 text-slate-500 pointer-events-none" />
+                </div>
+                <p className="text-xs text-slate-500">
+                    Current Branch: <span className="font-mono text-orange-400">{currentBranch}</span>
+                </p>
+            </div>
+            <div>
+                <button
+                    onClick={handleBranchSwitch}
+                    disabled={isSwitching || selectedBranch === currentBranch}
+                    className={`flex items-center gap-2 px-6 py-2 rounded-lg font-bold transition-all ${
+                        isSwitching || selectedBranch === currentBranch
+                        ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                        : 'bg-orange-600 hover:bg-orange-500 text-white'
+                    }`}
+                >
+                    <GitBranch size={18} />
+                    {isSwitching ? 'Switching...' : 'Switch & Rebuild'}
+                </button>
+            </div>
+        </div>
+      </section>
       
       {/* Investec Section */}
       <section className="bg-slate-900 p-6 rounded-xl border border-slate-800">

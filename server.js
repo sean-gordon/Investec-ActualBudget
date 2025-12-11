@@ -621,6 +621,49 @@ app.get('/api/version-check', async (req, res) => {
     }
 });
 
+app.get('/api/git/branches', async (req, res) => {
+    try {
+        const response = await fetch('https://api.github.com/repos/sean-gordon/Investec-ActualBudget/branches');
+        if (!response.ok) throw new Error('Failed to fetch branches');
+        const data = await response.json();
+        const branches = data.map(b => b.name);
+        res.json(branches);
+    } catch (e) {
+        addLog(`Branch fetch error: ${e.message}`, 'error');
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.get('/api/git/current', (req, res) => {
+    exec('git rev-parse --abbrev-ref HEAD', { cwd: __dirname }, (err, stdout) => {
+        if (err) return res.json({ branch: 'unknown' });
+        res.json({ branch: stdout.trim() });
+    });
+});
+
+app.post('/api/git/switch', (req, res) => {
+    const { branch } = req.body;
+    // Validate branch name to prevent command injection
+    if (!branch || !/^[a-zA-Z0-9_\-\.]+$/.test(branch)) {
+        return res.status(400).json({ error: 'Invalid branch name' });
+    }
+
+    addLog(`System switching to branch: ${branch}...`, 'info');
+    res.json({ status: 'updating', message: `Switching to ${branch}. Service will restart.` });
+    
+    setTimeout(() => {
+        const cmd = `git fetch origin && git checkout ${branch} && git pull origin ${branch} && docker compose up -d --build`;
+        exec(cmd, { cwd: __dirname }, (error, stdout, stderr) => {
+            if (error) {
+                console.error(`Switch error: ${error}`);
+                addLog(`Branch switch failed: ${error.message}`, 'error');
+                return;
+            }
+            console.log(`Switch output: ${stdout}`);
+        });
+    }, 1000);
+});
+
 app.post('/api/update', (req, res) => {
     addLog('System update initiated...', 'info');
     res.json({ status: 'updating', message: 'Update started. Service will restart shortly.' });
