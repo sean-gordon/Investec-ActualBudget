@@ -40,8 +40,8 @@ COPY package.json package-lock.json* ./
 # This recompiles better-sqlite3 for the production environment
 RUN npm install --omit=dev
 
-# Copy built assets from builder stage
-COPY --from=builder /app/dist ./dist
+# Copy built assets from builder stage to a safe location
+COPY --from=builder /app/dist /app-dist
 
 # Copy server script
 COPY server.js .
@@ -53,4 +53,6 @@ RUN mkdir -p data
 EXPOSE 46490
 
 # Start the backend server
-CMD ["node", "server.js"]
+# We copy assets from the safe /app-dist location to the mounted /app/dist folder at runtime
+# This ensures the frontend works even when the root directory is mounted from the host
+CMD ["sh", "-c", "mkdir -p dist && cp -r /app-dist/* dist/ && node server.js"]
