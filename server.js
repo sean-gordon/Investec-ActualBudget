@@ -680,7 +680,8 @@ app.post('/api/git/switch', (req, res) => {
     res.json({ status: 'updating', message: `Switching to ${branch}. Service will restart.` });
     
     setTimeout(() => {
-        const cmd = `git fetch origin && git checkout ${branch} && git pull origin ${branch} && docker compose up -d --build`;
+        // Use -B to force reset/create branch from origin, avoiding ambiguity with files
+        const cmd = `git fetch origin && git checkout -B ${branch} origin/${branch} && git pull origin ${branch} && docker compose up -d --build`;
         exec(cmd, { cwd: __dirname }, (error, stdout, stderr) => {
             if (error) {
                 console.error(`Switch error: ${error}`);
