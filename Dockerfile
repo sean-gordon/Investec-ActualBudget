@@ -25,7 +25,8 @@ WORKDIR /app
 
 # Install build tools for production dependency compilation
 # This is required because we are reinstalling modules in the clean stage
-RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
+# Added git for auto-update functionality and openssl for secure connections
+RUN apt-get update && apt-get install -y python3 make g++ git openssl ca-certificates && rm -rf /var/lib/apt/lists/*
 
 # Copy package files
 COPY package.json package-lock.json* ./
