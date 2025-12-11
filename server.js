@@ -690,7 +690,19 @@ app.post('/api/git/switch', (req, res) => {
     }
 
     const config = loadConfig();
-    const hostDir = config.hostProjectRoot ? `HOST_DIR="${config.hostProjectRoot}"` : '';
+    let hostDir = '';
+    
+    if (config.hostProjectRoot) {
+        // Simple sanitization: allow alphanumeric, slashes, dashes, underscores, dots, and spaces
+        // If it contains anything else (like semicolons or ampersands), ignore it to prevent injection
+        if (/^[a-zA-Z0-9_\-\.\/ ]+$/.test(config.hostProjectRoot)) {
+            hostDir = `HOST_DIR="${config.hostProjectRoot}"`;
+        } else {
+            addLog(`Security Warning: Invalid characters in Host Project Path. Ignoring.`, 'error');
+        }
+    }
+
+    addLog(`System switching to branch: ${branch}...`, 'info');
 
     addLog(`System switching to branch: ${branch}...`, 'info');
     res.json({ status: 'updating', message: `Switching to ${branch}. Service will restart.` });
@@ -714,7 +726,19 @@ app.post('/api/update', (req, res) => {
     res.json({ status: 'updating', message: 'Update started. Service will restart shortly.' });
     
     const config = loadConfig();
-    const hostDir = config.hostProjectRoot ? `HOST_DIR="${config.hostProjectRoot}"` : '';
+    let hostDir = '';
+    
+    if (config.hostProjectRoot) {
+        // Simple sanitization: allow alphanumeric, slashes, dashes, underscores, dots, and spaces
+        // If it contains anything else (like semicolons or ampersands), ignore it to prevent injection
+        if (/^[a-zA-Z0-9_\-\.\/ ]+$/.test(config.hostProjectRoot)) {
+            hostDir = `HOST_DIR="${config.hostProjectRoot}"`;
+        } else {
+            addLog(`Security Warning: Invalid characters in Host Project Path. Ignoring.`, 'error');
+        }
+    }
+
+    addLog(`System switching to branch: ${branch}...`, 'info');
 
     // Run update in background
     setTimeout(() => {
