@@ -1,3 +1,21 @@
+# Release v6.2.1 - Git Integration & Self-Repair
+
+## 🚀 Key Highlights
+This release brings full Git integration to the dashboard, allowing you to switch branches (e.g., test new features in `Dev`) and repair the installation directly from the UI. It also fixes the underlying architecture to allow the container to update itself reliably.
+
+### ✨ New Features
+*   **Git Branch Switching**: You can now switch between different branches (like `Dev` or `main`) directly from the Settings menu.
+    *   **Auto-Rebuild**: Switching branches automatically pulls the new code and rebuilds the Docker container.
+*   **Self-Healing Architecture**:
+    *   **Docker Socket Mounting**: The container now has access to the host's Docker daemon, allowing it to restart and rebuild itself without user intervention.
+    *   **Host Volume Mounting**: The container now directly accesses the host's `.git` folder, ensuring `git pull` commands update the actual source code on your server.
+
+### 🛠 Fixes
+*   **Missing Dependencies**: Added `git` and `docker-cli` to the container image.
+*   **Update Loop**: Fixed an issue where the "Update" button would fail because the container couldn't see the git repository.
+
+---
+
 # Release v6.2.0 - Auto-Update & Version Control
 
 ## 🚀 Key Highlights
