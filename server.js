@@ -497,6 +497,13 @@ const loadConfig = () => {
     }
     return {};
 };
+const setupCron = (schedule) => {
+    if (currentTask) { currentTask.stop(); currentTask = null; }
+    if (schedule && cron.validate(schedule)) {
+        currentTask = cron.schedule(schedule, () => runSync());
+        addLog(`Schedule updated: ${schedule}`, 'info');
+    }
+};
 const saveConfig = (cfg) => {
     ensureDataDir();
     fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2));
@@ -742,8 +749,6 @@ app.post('/api/git/switch', (req, res) => {
     }
 
     addLog(`System switching to branch: ${branch}...`, 'info');
-
-    addLog(`System switching to branch: ${branch}...`, 'info');
     res.json({ status: 'updating', message: `Switching to ${branch}. Service will restart.` });
     
     setTimeout(() => {
@@ -777,8 +782,6 @@ app.post('/api/update', (req, res) => {
         }
     }
 
-    addLog(`System switching to branch: ${branch}...`, 'info');
-
     // Run update in background
     setTimeout(() => {
         exec(`${hostDir} git pull && ${hostDir} docker compose up -d --build`, { cwd: __dirname }, (error, stdout, stderr) => {
@@ -792,14 +795,6 @@ app.post('/api/update', (req, res) => {
         });
     }, 1000);
 });
-
-const setupCron = (schedule) => {
-    if (currentTask) { currentTask.stop(); currentTask = null; }
-    if (schedule && cron.validate(schedule)) {
-        currentTask = cron.schedule(schedule, () => runSync());
-        addLog(`Schedule updated: ${schedule}`, 'info');
-    }
-};
 
 const initialConfig = loadConfig();
 setupCron(initialConfig.syncSchedule);
