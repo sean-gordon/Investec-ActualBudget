@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Activity, Settings, Play, CreditCard, ExternalLink, Wifi, Clock, Download } from 'lucide-react';
+import { Activity, Settings, Play, CreditCard, ExternalLink, Wifi, Clock, Download, Github } from 'lucide-react';
 import { AppConfig, LogEntry } from './types';
 import { SettingsForm } from './components/SettingsForm';
 import { LogConsole } from './components/LogConsole';
@@ -151,6 +151,15 @@ export default function App() {
               {isUpdating ? 'Updating...' : 'Update Available'}
             </button>
           )}
+          <a 
+            href="https://github.com/sean-gordon/Investec-ActualBudget" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="p-2 rounded-full hover:bg-slate-800 transition-colors text-slate-400"
+            title="View on GitHub"
+          >
+            <Github size={20} />
+          </a>
           <button
             onClick={() => setView(view === 'dashboard' ? 'settings' : 'dashboard')}
             className={`p-2 rounded-full hover:bg-slate-800 transition-colors ${view === 'settings' ? 'bg-slate-800 text-white' : 'text-slate-400'}`}
