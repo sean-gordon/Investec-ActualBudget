@@ -26,7 +26,12 @@ WORKDIR /app
 # Install build tools for production dependency compilation
 # This is required because we are reinstalling modules in the clean stage
 # Added git for auto-update functionality and openssl for secure connections
-RUN apt-get update && apt-get install -y python3 make g++ git openssl ca-certificates && rm -rf /var/lib/apt/lists/*
+# Added curl and gnupg to install docker cli
+RUN apt-get update && apt-get install -y python3 make g++ git openssl ca-certificates curl gnupg && \
+    curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/debian $(grep -oP '(?<=^VERSION_CODENAME=)[a-z]+' /etc/os-release) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null && \
+    apt-get update && apt-get install -y docker-ce-cli && \
+    rm -rf /var/lib/apt/lists/*
 
 # Copy package files
 COPY package.json package-lock.json* ./
