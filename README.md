@@ -1,6 +1,12 @@
 # Investec to Actual Budget Sync
 
+[![Known Vulnerabilities](https://snyk.io/test/github/sean-gordon/Investec-ActualBudget/badge.svg)](https://snyk.io/test/github/sean-gordon/Investec-ActualBudget)
+
 A self-hosted dashboard to automatically synchronise transactions from Investec South Africa (OpenAPI) to Actual Budget.
+
+## Security
+
+Code security is actively monitored by **Snyk** to ensure dependencies and container images remain free of known vulnerabilities.
 
 ## Features
 
