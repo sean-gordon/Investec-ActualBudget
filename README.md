@@ -1,12 +1,24 @@
 # Investec to Actual Budget Sync
 
-[![Known Vulnerabilities](https://snyk.io/test/github/sean-gordon/Investec-ActualBudget/badge.svg)](https://snyk.io/test/github/sean-gordon/Investec-ActualBudget)
-
 A self-hosted dashboard to automatically synchronise transactions from Investec South Africa (OpenAPI) to Actual Budget.
 
-## Security
+## Security First
 
 Code security is actively monitored by **Snyk** to ensure dependencies and container images remain free of known vulnerabilities.
+
+[![Known Vulnerabilities](https://snyk.io/test/github/sean-gordon/Investec-ActualBudget/badge.svg)](https://snyk.io/test/github/sean-gordon/Investec-ActualBudget)
+
+### 🛡️ Architecture & Data Privacy
+
+*   **Process Isolation**: The sync engine runs in a dedicated "Worker Process" that is spawned only when needed and terminates immediately after completion. This ensures:
+    *   **Memory Safety**: No residual data stays in memory.
+    *   **Database Integrity**: Prevents database locks by ensuring a clean connection lifecycle.
+*   **Containerized Environment**: The application runs within a Docker container, isolating it from the host system.
+    *   **Networking**: Internal communication between the frontend and backend occurs over a private internal network (when configured with `network_mode: bridge`).
+*   **Credential Handling**: 
+    *   Investec API keys and Actual Budget passwords are stored locally in `data/settings.json` within the container's volume.
+    *   Credentials are **never** transmitted to any third-party server. All traffic is strictly between your server, Investec, and your Actual Budget instance.
+*   **Source Code Transparency**: The entire project is open-source. You can inspect every line of code to verify how your data is handled.
 
 ## Features
 
