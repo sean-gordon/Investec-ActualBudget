@@ -104,6 +104,20 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-end">
             <div className="space-y-2">
+                <label className="text-sm text-slate-400">Host Project Path (Required for Self-Update)</label>
+                <input
+                    type="text"
+                    name="hostProjectRoot"
+                    value={formData.hostProjectRoot || ''}
+                    onChange={handleChange}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-orange-500 outline-none transition-all font-mono text-sm"
+                    placeholder="e.g. /home/user/Investec-ActualBudget"
+                />
+                <p className="text-xs text-slate-500">
+                    The absolute path to this folder on your server.
+                </p>
+            </div>
+            <div className="space-y-2">
                 <label className="text-sm text-slate-400">Target Branch</label>
                 <div className="relative">
                     <select

@@ -676,12 +676,15 @@ app.post('/api/git/switch', (req, res) => {
         return res.status(400).json({ error: 'Invalid branch name' });
     }
 
+    const config = loadConfig();
+    const hostDir = config.hostProjectRoot ? `HOST_DIR="${config.hostProjectRoot}"` : '';
+
     addLog(`System switching to branch: ${branch}...`, 'info');
     res.json({ status: 'updating', message: `Switching to ${branch}. Service will restart.` });
     
     setTimeout(() => {
         // Use -B to force reset/create branch from origin, avoiding ambiguity with files
-        const cmd = `git fetch origin && git checkout -B ${branch} origin/${branch} && git pull origin ${branch} && docker compose up -d --build`;
+        const cmd = `${hostDir} git fetch origin && git checkout -B ${branch} origin/${branch} && git pull origin ${branch} && ${hostDir} docker compose up -d --build`;
         exec(cmd, { cwd: __dirname }, (error, stdout, stderr) => {
             if (error) {
                 console.error(`Switch error: ${error}`);
@@ -697,9 +700,12 @@ app.post('/api/update', (req, res) => {
     addLog('System update initiated...', 'info');
     res.json({ status: 'updating', message: 'Update started. Service will restart shortly.' });
     
+    const config = loadConfig();
+    const hostDir = config.hostProjectRoot ? `HOST_DIR="${config.hostProjectRoot}"` : '';
+
     // Run update in background
     setTimeout(() => {
-        exec('git pull && docker compose up -d --build', { cwd: __dirname }, (error, stdout, stderr) => {
+        exec(`${hostDir} git pull && ${hostDir} docker compose up -d --build`, { cwd: __dirname }, (error, stdout, stderr) => {
             if (error) {
                 console.error(`Update error: ${error}`);
                 addLog(`Update failed: ${error.message}`, 'error');
