@@ -12,7 +12,7 @@ import dns from 'dns';
 /**
  * ============================================================================
  * INVESTEC TO ACTUAL SYNC SERVER
- * ============================================================================
+ * ============================================================================ 
  * Architecture: "Split-Brain" / Worker Model
  * 
  * 1. Main Process: 
@@ -134,9 +134,9 @@ const DEFAULT_CATEGORIES = {
   ]
 };
 
-// ============================================================================
+// ============================================================================ 
 // PART 1: WORKER PROCESS (The Engine)
-// ============================================================================
+// ============================================================================ 
 
 if (process.env.WORKER_ACTION) {
     const log = (msg, type = 'info') => {
@@ -290,7 +290,7 @@ if (process.env.WORKER_ACTION) {
             if (action === 'test-actual' || action === 'sync') {
                 
                 const rawUrl = payload.actualServerUrl || '';
-                const serverUrl = rawUrl.replace(/\/$/, '').trim(); 
+                const serverUrl = rawUrl.replace(///$/, '').trim(); 
                 const rawPass = payload.actualPassword || '';
                 const password = rawPass.trim();
                 const rawId = payload.actualBudgetId || '';
@@ -455,9 +455,9 @@ if (process.env.WORKER_ACTION) {
     })();
 } else {
 
-// ============================================================================
+// ============================================================================ 
 // PART 2: MAIN SERVER PROCESS (The Coordinator)
-// ============================================================================
+// ============================================================================ 
 
 const app = express();
 
@@ -544,9 +544,9 @@ const spawnWorker = (action, payload) => {
 app.use(cors());
 app.use(bodyParser.json());
 
-app.get('/api/status', (req, res) => res.json({ 
-    isProcessing, 
-    lastSyncTime, 
+app.get('/api/status', (req, res) => res.json({
+    isProcessing,
+    lastSyncTime,
     version: SCRIPT_VERSION,
     budgetLoaded: !!loadConfig().actualBudgetId 
 }));
@@ -713,7 +713,7 @@ app.get('/api/git/status', (req, res) => {
 
         const updateAvailable = localHash && remoteHash && localHash !== remoteHash;
 
-        res.json({ 
+        res.json({
             branch, 
             localHash, 
             remoteHash, 
