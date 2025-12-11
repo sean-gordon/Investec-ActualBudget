@@ -1,3 +1,20 @@
+# Release v6.2.2 - Reliable Self-Updates
+
+## 🚀 Key Highlights
+This release perfects the self-update and branch switching mechanism by allowing you to specify the exact location of your project on the host server. This ensures Docker always mounts the correct files during an update.
+
+### ✨ New Features
+*   **Host Project Path Setting**: A new configuration field in "Git Repository Control" allows you to define the absolute path to your project (e.g., `/data/Investec-ActualBudget`).
+    *   **Why is this needed?** When running inside a container, the app doesn't know where it lives on your actual server. Telling it the path allows it to control the Docker Daemon correctly to rebuild itself.
+*   **Startup Confirmation**: The system now logs the active Git branch upon startup, confirming that your branch switch was successful.
+*   **GitHub Link**: Added a quick link to the GitHub repository in the dashboard header.
+
+### 🛠 Fixes
+*   **"Dubious Ownership" Error**: Fixed Git permission errors when accessing the mounted source code.
+*   **Frontend Asset Persistence**: Fixed an issue where the UI would disappear during development builds because of volume mounting.
+
+---
+
 # Release v6.2.1 - Git Integration & Self-Repair
 
 ## 🚀 Key Highlights

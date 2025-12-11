@@ -135,7 +135,13 @@ This feature allows you to define a standard set of Category Groups and Categori
 }
 ```
 
-### 4. Automation
+### 4. Git Repository Control (New)
+*   **Host Project Path**: **(Important)** This is required for the "Update" and "Switch Branch" buttons to work.
+    *   Enter the absolute path to the project folder on your server (e.g., `/home/user/Investec-ActualBudget` or `/data/Investec-ActualBudget`).
+    *   *Why?* This allows the Docker container to correctly mount your source code during self-updates.
+*   **Target Branch**: Select a branch (like `main` or `Dev`) and click **Switch & Rebuild**.
+
+### 5. Automation
 *   **Cron Schedule**: Enter a cron expression to automate syncing.
     *   Run once a day at midnight: `0 0 * * *`
     *   Run every 6 hours: `0 */6 * * *`

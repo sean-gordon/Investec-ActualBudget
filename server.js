@@ -44,10 +44,23 @@ const DATA_DIR = path.join(__dirname, 'data');
 const CONFIG_FILE = path.join(DATA_DIR, 'settings.json');
 const CATEGORIES_FILE = path.join(DATA_DIR, 'categories.json');
 const ACTUAL_DATA_DIR = path.join(DATA_DIR, 'actual-data');
-const SCRIPT_VERSION = "6.2.1 - Git Support Fix";
+const SCRIPT_VERSION = "6.2.2 - Git Host Path Support";
 
 // Disable Self-Signed Cert Rejection
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+
+// --- STARTUP CHECKS ---
+setTimeout(() => {
+    // Check if we just switched branches
+    const config = loadConfig();
+    exec('git rev-parse --abbrev-ref HEAD', { cwd: __dirname }, (err, stdout) => {
+        if (!err && stdout) {
+            const currentBranch = stdout.trim();
+            // You might want to store the 'target' branch in a temp file or just log the current one
+            addLog(`System startup complete. Active Branch: ${currentBranch}`, 'success');
+        }
+    });
+}, 5000); // Wait for server to fully initialize
 
 // --- DEFAULT CATEGORIES ---
 const DEFAULT_CATEGORIES = {
