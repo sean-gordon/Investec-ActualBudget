@@ -114,10 +114,31 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
 
       {/* Git Branch Management */}
       <section className="bg-slate-900 p-6 rounded-xl border border-slate-800">
-        <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-          <div className="w-1 h-6 bg-orange-500 rounded-full"></div>
-          Git Repository Control
-        </h2>
+        <div className="flex justify-between items-center mb-4">
+            <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                <div className="w-1 h-6 bg-orange-500 rounded-full"></div>
+                Git Repository Control
+            </h2>
+            <button
+                onClick={() => {
+                    // Re-use the existing fetch logic
+                    fetch('/api/git/status')
+                        .then(res => res.json())
+                        .then(data => {
+                            setCurrentBranch(data.branch);
+                            setSelectedBranch(prev => prev === '' || prev === data.branch ? data.branch : prev);
+                            setUpdateAvailable(data.updateAvailable);
+                            alert('Check complete.');
+                        })
+                        .catch(console.error);
+                }}
+                className="text-sm bg-slate-800 hover:bg-slate-700 px-3 py-1 rounded text-slate-300 transition-colors flex items-center gap-2"
+                title="Force check for updates"
+            >
+                <RotateCcw size={14} />
+                Check Now
+            </button>
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-end">
             <div className="space-y-2">
                 <label className="text-sm text-slate-400">Host Project Path (Required for Self-Update)</label>
