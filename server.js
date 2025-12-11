@@ -290,7 +290,7 @@ if (process.env.WORKER_ACTION) {
             if (action === 'test-actual' || action === 'sync') {
                 
                 const rawUrl = payload.actualServerUrl || '';
-                const serverUrl = rawUrl.replace(///$/, '').trim(); 
+                const serverUrl = rawUrl.replace(/\/$/, '').trim(); 
                 const rawPass = payload.actualPassword || '';
                 const password = rawPass.trim();
                 const rawId = payload.actualBudgetId || '';
