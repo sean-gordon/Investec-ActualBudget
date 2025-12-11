@@ -139,6 +139,7 @@ This feature allows you to define a standard set of Category Groups and Categori
 *   **Host Project Path**: **(Important)** This is required for the "Update" and "Switch Branch" buttons to work.
     *   Enter the absolute path to the project folder on your server (e.g., `/home/user/Investec-ActualBudget` or `/data/Investec-ActualBudget`).
     *   *Why?* This allows the Docker container to correctly mount your source code during self-updates.
+    *   **Tip:** To find this path on Linux, open your terminal in the project folder and run: `pwd`
 *   **Target Branch**: Select a branch (like `main` or `Dev`) and click **Switch & Rebuild**.
 
 ### 5. Automation
