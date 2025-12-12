@@ -1,3 +1,22 @@
+# Release v6.4.0 - Actual AI Log Viewer
+
+## 🚀 Key Highlights
+This release adds the ability to monitor your **Actual AI** containers directly from the Investec Sync dashboard. This is crucial for debugging classification issues without needing to SSH into your server.
+
+### ✨ New Features
+*   **Actual AI Log Viewer**: 
+    *   **Live Log Streaming**: View the real-time logs of your Actual AI docker container.
+    *   **Profile Association**: Link specific Actual AI containers to specific Sync Profiles.
+    *   **Context Switching**: Easily switch between the System Logs (Investec Sync) and Actual AI Logs using a dropdown in the "Live Logs" panel.
+    *   **Auto-Polling**: AI Logs update automatically every 5 seconds.
+*   **Container Selection**:
+    *   The Profile Settings form now auto-detects running Docker containers and provides a dropdown to select which one runs Actual AI for that profile.
+
+### 🛠 Fixes
+*   **Performance**: Optimized log polling to reduce server load.
+
+---
+
 # Release v6.3.3 - Update Mechanism Fix
 
 ## 🚀 Key Highlights

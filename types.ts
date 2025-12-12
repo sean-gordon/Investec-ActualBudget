@@ -8,6 +8,7 @@ export interface SyncProfile {
   actualServerUrl: string;
   actualPassword?: string;
   actualBudgetId: string;
+  actualAiContainer?: string;
   syncSchedule: string; // Cron expression
   categories?: CategoryTree;
 }

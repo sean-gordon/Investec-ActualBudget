@@ -45,7 +45,7 @@ const DATA_DIR = path.join(__dirname, 'data');
 const CONFIG_FILE = path.join(DATA_DIR, 'settings.json');
 const CATEGORIES_FILE = path.join(DATA_DIR, 'categories.json');
 const ACTUAL_DATA_DIR = path.join(DATA_DIR, 'actual-data');
-const SCRIPT_VERSION = "6.3.3 - Docker Compose Fix";
+const SCRIPT_VERSION = "6.4.0 - Actual AI Log Viewer";
 
 // Disable Self-Signed Cert Rejection
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
@@ -835,6 +835,32 @@ app.post('/api/update', (req, res) => {
             if (stderr) console.error(`Update stderr: ${stderr}`);
         });
     }, 1000);
+});
+
+// --- DOCKER UTILS ---
+app.get('/api/docker/containers', (req, res) => {
+    exec('docker ps --format "{{.Names}}"', (err, stdout) => {
+        if (err) {
+            console.error('Docker ps error:', err);
+            return res.json([]);
+        }
+        const containers = stdout.split('\n').map(s => s.trim()).filter(s => s.length > 0);
+        res.json(containers);
+    });
+});
+
+app.get('/api/docker/logs', (req, res) => {
+    const { container } = req.query;
+    if (!container || !/^[a-zA-Z0-9_\-\.]+$/.test(container)) {
+        return res.status(400).json({ error: 'Invalid container name' });
+    }
+
+    exec(`docker logs --tail 100 ${container}`, (err, stdout, stderr) => {
+        // Docker logs often go to stderr even if not errors (e.g. app logs)
+        // We combine them or just return what we have
+        const combined = (stdout || '') + (stderr || '');
+        res.json({ logs: combined });
+    });
 });
 
 const initialConfig = loadConfig();

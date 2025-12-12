@@ -19,6 +19,10 @@ export default function App() {
   const [updateInfo, setUpdateInfo] = useState<{ available: boolean; latest: string } | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
 
+  // AI Logs State
+  const [logSource, setLogSource] = useState<string>('system'); // 'system' or profileId
+  const [aiLogs, setAiLogs] = useState<string>('');
+
   const fetchJson = async (url: string, options?: RequestInit) => {
     try {
       const res = await fetch(url, options);
@@ -36,13 +40,12 @@ export default function App() {
     }
   };
 
+  // Initial Configuration & Version Check
   useEffect(() => {
-    // Initial Load
     fetchJson(`${API_BASE}/config`)
       .then(data => setConfig(data))
       .catch(console.error);
 
-    // Check for updates
     fetchJson(`${API_BASE}/version-check`)
       .then(data => {
         if (data.updateAvailable) {
@@ -50,20 +53,21 @@ export default function App() {
         }
       })
       .catch(console.error);
+  }, []);
 
-    // Poll Status and Logs
+  // System Status & System Logs Polling (Every 2s)
+  useEffect(() => {
     const poll = async () => {
       try {
-        // 1. Get Status
         const statusData = await fetchJson(`${API_BASE}/status`);
         setIsConnected(true);
         setProcessingProfiles(statusData.processingProfiles || []);
         setServerVersion(statusData.version);
 
-        // 2. Get Logs
-        const logsData = await fetchJson(`${API_BASE}/logs`);
-        setLogs(logsData);
-
+        if (logSource === 'system') {
+            const logsData = await fetchJson(`${API_BASE}/logs`);
+            setLogs(logsData);
+        }
       } catch (e) {
         setIsConnected(false);
       }
@@ -72,7 +76,34 @@ export default function App() {
     poll();
     const interval = setInterval(poll, 2000);
     return () => clearInterval(interval);
-  }, []);
+  }, [logSource]);
+
+  // AI Logs Polling (Every 5s)
+  useEffect(() => {
+    if (logSource === 'system') {
+        setAiLogs('');
+        return;
+    }
+
+    const pollAi = async () => {
+        const profile = config.profiles.find(p => p.id === logSource);
+        if (!profile || !profile.actualAiContainer) {
+            setAiLogs('No Actual AI container configured for this profile.');
+            return;
+        }
+
+        try {
+            const res = await fetchJson(`${API_BASE}/docker/logs?container=${profile.actualAiContainer}`);
+            setAiLogs(res.logs || 'No logs returned.');
+        } catch (e: any) {
+            setAiLogs(`Failed to fetch logs: ${e.message}`);
+        }
+    };
+
+    pollAi();
+    const interval = setInterval(pollAi, 5000);
+    return () => clearInterval(interval);
+  }, [logSource, config.profiles]);
 
   const handleSaveSettings = async (newConfig: AppConfig) => {
     try {
@@ -90,8 +121,6 @@ export default function App() {
 
   const triggerSync = async (profileId: string) => {
     if (processingProfiles.includes(profileId)) return;
-    
-    // Optimistic update
     setProcessingProfiles(prev => [...prev, profileId]);
     
     try {
@@ -108,15 +137,10 @@ export default function App() {
   };
 
   const toggleProfile = async (profileId: string, enabled: boolean) => {
-    // 1. Create updated profiles array
     const updatedProfiles = config.profiles.map(p => 
         p.id === profileId ? { ...p, enabled } : p
     );
-    
-    // 2. Create full new config object
     const newConfig = { ...config, profiles: updatedProfiles };
-    
-    // 3. Optimistic UI Update
     setConfig(newConfig);
     
     try {
@@ -127,16 +151,13 @@ export default function App() {
         });
     } catch (e) {
         console.error("Failed to toggle profile:", e);
-        // Revert on error would be ideal, but usually next poll fixes it
     }
   };
 
   const deleteProfile = async (profileId: string) => {
       if (!confirm("Are you sure you want to delete this profile? This cannot be undone.")) return;
-      
       const updatedProfiles = config.profiles.filter(p => p.id !== profileId);
       const newConfig = { ...config, profiles: updatedProfiles };
-      
       setConfig(newConfig);
       
       try {
@@ -221,7 +242,7 @@ export default function App() {
               {/* Left Col: Profiles Table */}
               <div className="xl:col-span-2 flex flex-col gap-6 h-full overflow-hidden">
                 
-                {/* Profiles Table (Flex-1 to grow/shrink) */}
+                {/* Profiles Table */}
                 <div className="bg-slate-900 rounded-xl border border-slate-800 shadow-lg overflow-hidden flex flex-col flex-1 min-h-0">
                     <div className="px-6 py-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/50 flex-none">
                         <h2 className="text-lg font-semibold text-white flex items-center gap-2">
@@ -251,7 +272,7 @@ export default function App() {
                                 {config.profiles && config.profiles.length > 0 ? (
                                     config.profiles.map(profile => {
                                         const isSyncing = processingProfiles.includes(profile.id);
-                                        const isEnabled = profile.enabled !== false; // Default true if undefined
+                                        const isEnabled = profile.enabled !== false;
                                         return (
                                             <tr key={profile.id} className={`hover:bg-slate-800/30 transition-colors ${!isEnabled ? 'opacity-50 grayscale' : ''}`}>
                                                 <td className="px-6 py-4 whitespace-nowrap">
@@ -332,7 +353,7 @@ export default function App() {
                     </div>
                 </div>
 
-                {/* System Status Cards (Fixed Height) */}
+                {/* System Status Cards */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 flex-none">
                     <div className="bg-slate-900 p-5 rounded-xl border border-slate-800 flex items-center gap-4">
                         <div className={`p-3 rounded-full ${isConnected ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}`}>
@@ -360,12 +381,27 @@ export default function App() {
               {/* Right Col: Logs */}
               <div className="xl:col-span-1 flex flex-col h-full overflow-hidden">
                 <div className="bg-slate-900 rounded-xl border border-slate-800 shadow-lg flex flex-col h-full overflow-hidden">
-                    <div className="px-5 py-4 border-b border-slate-800 bg-slate-900/50 flex-none">
+                    <div className="px-5 py-4 border-b border-slate-800 bg-slate-900/50 flex-none flex justify-between items-center">
                          <h2 className="text-lg font-semibold text-white">Live Logs</h2>
+                         <select 
+                            value={logSource} 
+                            onChange={e => setLogSource(e.target.value)}
+                            className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-blue-500 text-slate-300"
+                        >
+                            <option value="system">Investec Sync (System)</option>
+                            {config.profiles
+                                .filter(p => p.actualAiContainer)
+                                .map(p => (
+                                    <option key={p.id} value={p.id}>Actual AI: {p.name}</option>
+                            ))}
+                        </select>
                     </div>
                     <div className="flex-1 overflow-hidden p-0 relative">
                          <div className="absolute inset-0">
-                            <LogConsole logs={logs} />
+                            <LogConsole 
+                                logs={logSource === 'system' ? logs : undefined} 
+                                rawLogs={logSource !== 'system' ? aiLogs : undefined} 
+                            />
                          </div>
                     </div>
                 </div>

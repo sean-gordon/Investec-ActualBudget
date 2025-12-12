@@ -41,6 +41,7 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
   const [selectedBranch, setSelectedBranch] = useState<string>('');
   const [isSwitching, setIsSwitching] = useState(false);
   const [updateAvailable, setUpdateAvailable] = useState(false);
+  const [containers, setContainers] = useState<string[]>([]);
 
   useEffect(() => {
     setProfiles(config.profiles || []);
@@ -51,11 +52,16 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
     }
   }, [config]);
 
-  // Fetch default categories once
+  // Fetch default categories and containers once
   useEffect(() => {
     fetch('/api/categories')
       .then(res => res.json())
       .then(data => setDefaultCategories(data))
+      .catch(console.error);
+
+    fetch('/api/docker/containers')
+      .then(res => res.json())
+      .then(data => setContainers(data))
       .catch(console.error);
       
     // Fetch Git Info
@@ -413,6 +419,21 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
                                 onChange={(e) => handleProfileChange('actualPassword', e.target.value)}
                                 className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-purple-500 outline-none"
                             />
+                        </div>
+
+                        <div className="space-y-2 md:col-span-2">
+                            <label className="text-sm text-slate-400">Actual AI Container (Optional)</label>
+                            <select
+                                value={selectedProfile.actualAiContainer || ''}
+                                onChange={(e) => handleProfileChange('actualAiContainer', e.target.value)}
+                                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-purple-500 outline-none"
+                            >
+                                <option value="">(None)</option>
+                                {containers.map(c => (
+                                    <option key={c} value={c}>{c}</option>
+                                ))}
+                            </select>
+                            <p className="text-xs text-slate-500">Select the Docker container running Actual AI for this profile.</p>
                         </div>
 
                         {/* Category Mapping */}
