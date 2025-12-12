@@ -1,3 +1,15 @@
+# Release v6.4.1 - Update Debugging
+
+## 🚀 Key Highlights
+This release improves the robustness of the self-update mechanism and adds persistent logging to help diagnose update failures.
+
+### 🛠 Fixes & Improvements
+*   **Persistent Update Logs**: Updates are now logged to a file on the server. You can view this log via the `/api/debug/update-log` endpoint (or check `data/update.log` in your volume) to see exactly why an update might fail.
+*   **Robust Update Process**: The update command has been split into distinct steps (Pull -> Build -> Up) with error checking at each stage.
+*   **Docker Compose Check**: The system now verifies that `docker compose` is available before attempting an update.
+
+---
+
 # Release v6.4.0 - Actual AI Log Viewer
 
 ## 🚀 Key Highlights
