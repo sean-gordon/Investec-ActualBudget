@@ -228,6 +228,11 @@ export default function App() {
   }, [systemLogs, rawAiLogs, logViewMode, updateLogData]);
 
 
+  const handleProfileSelect = (id: string) => {
+      setRawAiLogs(''); // Clear immediately to prevent ghost logs
+      setActiveProfileId(id);
+  };
+
   const handleSaveSettings = async (newConfig: AppConfig) => {
     try {
       await fetchJson(`${API_BASE}/config`, {
@@ -382,7 +387,7 @@ export default function App() {
                                         return (
                                             <tr 
                                                 key={profile.id} 
-                                                onClick={() => setActiveProfileId(profile.id)}
+                                                onClick={() => handleProfileSelect(profile.id)}
                                                 className={`cursor-pointer transition-colors border-l-4 ${
                                                     isActive 
                                                     ? 'bg-slate-800/60 border-investec-500' 

@@ -1,3 +1,13 @@
+# Release v6.4.7 - Instant Log Clearing
+
+## 🚀 Key Highlights
+This release eliminates the "ghost log" effect. When you switch profiles, the log viewer is now cleared *instantly* before the new data loads, ensuring you never see data from the previous profile under the wrong header.
+
+### 🛠 Fixes
+*   **Zero-Latency Clearing**: The AI log buffer is now flushed synchronously upon profile selection, rather than waiting for a render cycle. This provides a much snappier feel.
+
+---
+
 # Release v6.4.6 - Strict Log Isolation
 
 ## 🚀 Key Highlights
