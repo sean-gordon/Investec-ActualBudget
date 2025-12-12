@@ -1,3 +1,58 @@
+# Release v6.3.2 - Scrolling & Update Fixes
+
+## 🚀 Key Highlights
+This release addresses critical usability issues, ensuring the dashboard works smoothly on all devices and updates reliably.
+
+### 🛠 Fixes
+*   **Reliable Updates**: Hardened the self-update command to force a container rebuild (`--force-recreate`). This ensures you're always running the latest code after clicking "Update".
+*   **Scroll Lock**: Fixed an issue where the Live Logs panel would scroll the entire webpage down. Now, only the log panel itself scrolls, keeping the main dashboard layout stable and accessible.
+*   **Layout Polish**: Removed the redundant "Server Time" card and optimized the dashboard to fit perfectly within the browser viewport (no double scrollbars).
+*   **Profile Toggling**: Fixed a bug where toggling one profile's status (Enable/Disable) could inadvertently affect others.
+
+---
+
+# Release v6.3.1 - Enhanced Profile Management
+
+## 🚀 Key Highlights
+This release refines the Multi-Profile system with a cleaner table interface, status indicators, and more granular control over your sync configurations.
+
+### ✨ New Features
+*   **Table View**: The main dashboard now displays profiles in a clean, responsive table, showing you the status, target server, and schedule for each profile at a glance.
+*   **Enable/Disable Profiles**: You can now toggle profiles on or off directly from the dashboard or the settings page. Disabled profiles will not run scheduled or manual syncs.
+*   **Delete Profiles**: Added the ability to delete profiles (with confirmation) directly from the dashboard table.
+*   **Connection Testing**: Re-introduced the "Test Connection" buttons in the profile editor. You can now verify your Investec credentials and Actual Budget connection individually before saving.
+*   **Status Indicators**: The table provides clear visual feedback on whether a profile is "Ready", "Syncing", or "Disabled".
+
+### 🛡 Security & Maintenance
+*   **Vulnerability Fixes**: Updated dependencies to resolve known vulnerabilities in `esbuild` / `vite`.
+*   **Port Configuration**: The application port can now be easily changed in `docker-compose.yml` via the `PORT` environment variable.
+
+---
+
+# Release v6.3.0 - Multi-Profile Support
+
+## 🚀 Key Highlights
+This release introduces full support for **Sync Profiles**. You can now configure multiple independent Investec accounts and sync them to completely different Actual Budget instances or files.
+
+### ✨ New Features
+*   **Multi-Profile Management**: 
+    *   Manage multiple configurations (Profiles) from a single dashboard.
+    *   Create, Edit, Duplicate, and Delete profiles easily.
+    *   Each profile has its own:
+        *   Investec API Credentials.
+        *   Actual Budget Server URL & Port (e.g., `localhost:5006` vs `localhost:5007`).
+        *   Budget ID & Password.
+        *   Cron Schedule.
+*   **Concurrent Syncing**: The system can now run sync jobs for different profiles in parallel without conflict.
+*   **Dashboard Upgrade**: The main dashboard now lists all your active profiles with individual "Sync Now" controls and status indicators.
+*   **Automatic Migration**: Existing configurations are automatically migrated to a "Default Profile" upon update.
+
+### 🛠 Improvements
+*   **Data Isolation**: Each profile uses a unique, isolated temporary data directory during sync to prevent file locking issues.
+*   **Settings UI**: Completely redesigned Settings page with a Master-Detail view for better usability.
+
+---
+
 # Release v6.2.2 - Reliable Self-Updates
 
 ## 🚀 Key Highlights

@@ -1,6 +1,6 @@
 # Investec to Actual Budget Sync
 
-A self-hosted dashboard to automatically synchronise transactions from Investec South Africa (OpenAPI) to Actual Budget.
+A self-hosted dashboard to automatically synchronise transactions from multiple Investec South Africa (OpenAPI) accounts to Actual Budget instances.
 
 ## Security First
 
@@ -22,6 +22,14 @@ Code security is actively monitored by **Snyk** to ensure dependencies and conta
 
 ## Features
 
+*   **Multi-Profile Support**: Manage multiple sync profiles (e.g., "Sean's Account", "Shelley's Account") from a single dashboard.
+*   **Clean Table View**: Profiles are displayed in a responsive table, showing status, target, and schedule at a glance.
+*   **Profile Controls**:
+    *   **Enable/Disable**: Toggle profiles on or off directly from the dashboard or settings.
+    *   **Test Credentials**: Verify your Investec and Actual Budget connections before saving.
+    *   **Delete**: Remove unused profiles with a safe confirmation step.
+*   **Flexible Targets**: Each profile can sync to a different Actual Budget server (different ports/URLs) or different budget files.
+*   **Concurrent Syncing**: The system can now run sync jobs for different profiles in parallel without conflict.
 *   **Secure Architecture**: Uses process isolation for every sync to prevent database locks.
 *   **Automatic Account Creation**: Automatically creates accounts in Actual Budget based on your Investec products (e.g., "Private Bank Account 1234").
 *   **Category Synchronisation**: Define your master category list in the Settings UI. The system ensures these groups and categories exist in your budget.
@@ -97,26 +105,25 @@ docker compose up -d --build
 1.  Open your browser and go to `http://localhost:46490` (or your server IP).
 2.  Click the **Settings** (Gear icon) in the top right.
 
-### 1. Investec Credentials
-You need to apply for "Programmable Banking" access in your Investec Online Banking.
-*   **Client ID**: Provided by Investec.
-*   **Secret ID**: Provided by Investec.
-*   **API Key**: The API key you generated in the Programmable Banking portal.
+### 1. Sync Profiles
+The "Profiles" system allows you to manage multiple sync configurations independently.
+*   **Create Profile**: Click the `+` button to add a new profile.
+*   **Name**: Give your profile a descriptive name (e.g., "Sean's Investec").
+*   **Enable/Disable**: Use the toggle to temporarily pause syncing for a profile without deleting it.
+*   **Test Connections**: Use the "Test Connection" buttons to verify your credentials for both Investec and Actual Budget.
+*   **Credentials**: Enter the unique Investec Client ID, Secret, and API Key for this profile.
+*   **Actual Budget Target**: 
+    *   **Server URL**: Specify the exact URL and port for the target Actual Budget instance (e.g., `http://192.168.1.50:5006` for Sean, `http://192.168.1.50:5007` for Shelley).
+    *   **Sync ID**: The specific budget ID to sync with.
+    *   **Password**: The specific password for that file/server.
+*   **Schedule**: Set an independent cron schedule for this profile.
 
-### 2. Actual Budget Settings
-*   **Server URL**: Usually `http://127.0.0.1:5006` (if using Host Mode).
-*   **Sync ID**: Found in Actual Budget under **Settings > Advanced Settings**.
-    *   *Important*: Ensure your budget is "Remote" (uploaded), not "Local". Check this via **File > Close File** in Actual Budget.
-*   **Password**:
-    *   If your file has **End-to-End Encryption**, enter the File Password.
-    *   If no encryption, but the server has a password, enter the Server Password.
-
-### 3. Category Management
+### 2. Category Management
 This feature allows you to define a standard set of Category Groups and Categories.
 *   **How it works**: When a Sync runs, the system checks if these Groups and Categories exist in your Actual Budget.
 *   **Additive Only**: If a category is missing, it is **created**. If a category already exists, it is left alone. The system **never deletes** categories from your budget.
 *   **How to Edit**:
-    1.  In Settings, find the **Category Management** section.
+    1.  In Settings, find the **Global Category Mapping** section.
     2.  Click **Edit** to reveal the JSON editor.
     3.  The format is `"Group Name": ["Category 1", "Category 2"]`.
     4.  Modify the list as needed and click **Save Configuration**.
@@ -135,17 +142,12 @@ This feature allows you to define a standard set of Category Groups and Categori
 }
 ```
 
-### 4. Git Repository Control (New)
+### 3. Git Repository Control
 *   **Host Project Path**: **(Important)** This is required for the "Update" and "Switch Branch" buttons to work.
     *   Enter the absolute path to the project folder on your server (e.g., `/home/user/Investec-ActualBudget` or `/data/Investec-ActualBudget`).
     *   *Why?* This allows the Docker container to correctly mount your source code during self-updates.
     *   **Tip:** To find this path on Linux, open your terminal in the project folder and run: `pwd`
 *   **Target Branch**: Select a branch (like `main` or `Dev`) and click **Switch & Rebuild**.
-
-### 5. Automation
-*   **Cron Schedule**: Enter a cron expression to automate syncing.
-    *   Run once a day at midnight: `0 0 * * *`
-    *   Run every 6 hours: `0 */6 * * *`
 
 ---
 

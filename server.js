@@ -8,6 +8,7 @@ import { fileURLToPath } from 'url';
 import { fork, exec } from 'child_process';
 import * as actual from '@actual-app/api';
 import dns from 'dns';
+import { v4 as uuidv4 } from 'uuid';
 
 /**
  * ============================================================================
@@ -19,7 +20,7 @@ import dns from 'dns';
  *    - Runs the Express Web Server (Port 46490).
  *    - Serves the React Frontend.
  *    - Manages Configuration (settings.json) & Categories (categories.json).
- *    - Schedules Cron Jobs.
+ *    - Schedules Cron Jobs per Profile.
  *    - Spawns Worker Processes.
  * 
  * 2. Worker Process:
@@ -44,7 +45,7 @@ const DATA_DIR = path.join(__dirname, 'data');
 const CONFIG_FILE = path.join(DATA_DIR, 'settings.json');
 const CATEGORIES_FILE = path.join(DATA_DIR, 'categories.json');
 const ACTUAL_DATA_DIR = path.join(DATA_DIR, 'actual-data');
-const SCRIPT_VERSION = "6.2.2 - Git Host Path Support";
+const SCRIPT_VERSION = "6.3.2 - Scrolling & Update Fixes";
 
 // Disable Self-Signed Cert Rejection
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
@@ -145,25 +146,36 @@ if (process.env.WORKER_ACTION) {
 
     const action = process.env.WORKER_ACTION;
     const payload = JSON.parse(process.env.WORKER_PAYLOAD || '{}');
+    const profileName = payload.name || 'Unknown Profile';
+
+    // Helper to prefix logs with profile name
+    const logP = (msg, type = 'info') => log(`[${profileName}] ${msg}`, type);
 
     (async () => {
         try {
-            log(`Worker started: ${action}`, 'info');
+            logP(`Worker started: ${action}`, 'info');
+
+            // Unique Data Dir per Profile to avoid locking issues if running parallel
+            // or just use one. Actual API creates a lock file. 
+            // If we run parallel, we MUST use different data directories.
+            // We'll suffix the data dir with the profile ID if available.
+            const profileId = payload.id || 'default';
+            const PROFILE_DATA_DIR = path.join(ACTUAL_DATA_DIR, profileId);
 
             const cleanDataDir = () => {
                 try {
-                    if (fs.existsSync(ACTUAL_DATA_DIR)) {
-                        fs.rmSync(ACTUAL_DATA_DIR, { recursive: true, force: true });
+                    if (fs.existsSync(PROFILE_DATA_DIR)) {
+                        fs.rmSync(PROFILE_DATA_DIR, { recursive: true, force: true });
                     }
-                    fs.mkdirSync(ACTUAL_DATA_DIR, { recursive: true });
+                    fs.mkdirSync(PROFILE_DATA_DIR, { recursive: true });
                 } catch (e) {
-                    log(`Cleanup warning: ${e.message}`, 'error');
+                    logP(`Cleanup warning: ${e.message}`, 'error');
                 }
             };
 
             // --- HELPER: Category Sync Logic ---
             const syncCategories = async (categoryTree) => {
-                log('Syncing Categories...', 'info');
+                logP('Syncing Categories...', 'info');
                 
                 // Get existing data to prevent duplicates
                 let existingGroups = await actual.getCategoryGroups();
@@ -184,7 +196,7 @@ if (process.env.WORKER_ACTION) {
                             group = existingGroups.find(g => g.id === newGroupId);
                             groupsCreated++;
                         } catch (e) {
-                            log(`Failed to create Group "${groupName}": ${e.message}`, 'error');
+                            logP(`Failed to create Group "${groupName}": ${e.message}`, 'error');
                             continue;
                         }
                     }
@@ -200,7 +212,7 @@ if (process.env.WORKER_ACTION) {
                                 await actual.createCategory({ name: catName, group_id: group.id });
                                 catsCreated++;
                             } catch (e) {
-                                log(`Failed to create Category "${catName}": ${e.message}`, 'error');
+                                logP(`Failed to create Category "${catName}": ${e.message}`, 'error');
                             }
                         }
                     }
@@ -208,9 +220,9 @@ if (process.env.WORKER_ACTION) {
                 
                 // Refetch categories to ensure cache is up to date for any other ops
                 if (groupsCreated > 0 || catsCreated > 0) {
-                    log(`Categories Synchronised: Created ${groupsCreated} Groups and ${catsCreated} Categories.`, 'success');
+                    logP(`Categories Synchronised: Created ${groupsCreated} Groups and ${catsCreated} Categories.`, 'success');
                 } else {
-                    log('Categories up to date.', 'info');
+                    logP('Categories up to date.', 'info');
                 }
             };
 
@@ -299,9 +311,9 @@ if (process.env.WORKER_ACTION) {
                 if (!serverUrl || !budgetId) throw new Error("Missing Server URL or Budget ID");
 
                 const maskedPass = password ? `${password.substring(0,2)}***${password.slice(-2)}` : '(none)';
-                log(`Config: URL=${serverUrl} | ID=${budgetId.substring(0,8)}... | Pass=${maskedPass}`, 'info');
+                logP(`Config: URL=${serverUrl} | ID=${budgetId.substring(0,8)}... | Pass=${maskedPass}`, 'info');
 
-                log(`Network Check: ${serverUrl}/info...`, 'info');
+                logP(`Network Check: ${serverUrl}/info...`, 'info');
                 try {
                     const infoRes = await fetch(`${serverUrl}/info`);
                     if (!infoRes.ok) throw new Error(`Status ${infoRes.status}`);
@@ -310,24 +322,24 @@ if (process.env.WORKER_ACTION) {
                 }
 
                 cleanDataDir();
-                log(`Initialising API Engine...`, 'info');
+                logP(`Initialising API Engine (Dir: ${profileId})...`, 'info');
                 
                 const initConfig = {
-                    dataDir: ACTUAL_DATA_DIR,
+                    dataDir: PROFILE_DATA_DIR,
                     serverURL: serverUrl,
                     password: password && password.length > 0 ? password : undefined
                 };
                 
                 await actual.init(initConfig);
                 
-                log(`Fetching budget context...`, 'info');
+                logP(`Fetching budget context...`, 'info');
                 try {
                     await actual.downloadBudget(budgetId); 
                 } catch (dlErr) {
                     const errString = dlErr.toString().toLowerCase();
                     if (errString.includes('invalid-password') || errString.includes('encryption')) {
                         if (initConfig.password) {
-                             log(`File encrypted. Retrying with password...`, 'info');
+                             logP(`File encrypted. Retrying with password...`, 'info');
                              try {
                                  await actual.downloadBudget(budgetId, { password: initConfig.password });
                              } catch (retryErr) {
@@ -348,18 +360,18 @@ if (process.env.WORKER_ACTION) {
                     return;
                 }
 
-                log('Budget loaded. Starting Sync...', 'success');
+                logP('Budget loaded. Starting Sync...', 'success');
 
                 // --- CATEGORY SYNC ---
                 if (payload.categories) {
                     await syncCategories(payload.categories);
                 } else {
-                    log('No category configuration found. Skipping category sync.', 'info');
+                    logP('No category configuration found. Skipping category sync.', 'info');
                 }
                 
-                log('Fetching Investec data...', 'info');
+                logP('Fetching Investec data...', 'info');
                 const investecData = await fetchInvestec(payload);
-                log(`Found ${investecData.accounts.length} bank accounts.`, 'info');
+                logP(`Found ${investecData.accounts.length} bank accounts.`, 'info');
 
                 const endDate = new Date();
                 const startDate = new Date();
@@ -389,23 +401,23 @@ if (process.env.WORKER_ACTION) {
                     );
 
                     if (!matchedAccount) {
-                        log(`Account "${uniqueName}" not found in Actual. Creating...`, 'info');
+                        logP(`Account "${uniqueName}" not found in Actual. Creating...`, 'info');
                         try {
                             const newId = await actual.createAccount({
                                 name: uniqueName,
                                 type: accType,
                                 offbudget: false
                             });
-                            log(`✅ Created account: "${uniqueName}"`, 'success');
+                            logP(`✅ Created account: "${uniqueName}"`, 'success');
                             actualAccounts = await actual.getAccounts();
                             matchedAccount = actualAccounts.find(a => a.id === newId);
                         } catch (createErr) {
-                            log(`❌ Failed to create account "${uniqueName}": ${createErr.message}`, 'error');
+                            logP(`❌ Failed to create account "${uniqueName}": ${createErr.message}`, 'error');
                             continue; 
                         }
                     }
 
-                    log(`Syncing: "${uniqueName}"`, 'info');
+                    logP(`Syncing: "${uniqueName}"`, 'info');
 
                     const txUrl = `${investecData.baseUrl}/za/pb/v1/accounts/${invAcc.accountId}/transactions?fromDate=${fromStr}&toDate=${toStr}`;
                     const txRes = await fetch(txUrl, {
@@ -419,33 +431,33 @@ if (process.env.WORKER_ACTION) {
                             .map(transformTransaction)
                             .filter(t => t.date); 
 
-                        log(`  Importing ${actualTxs.length} transactions...`, 'info');
+                        logP(`  Importing ${actualTxs.length} transactions...`, 'info');
                         const result = await actual.importTransactions(matchedAccount.id, actualTxs);
                         
                         const count = (result?.added?.length || 0) + (result?.updated?.length || 0);
                         if (count > 0) {
-                            log(`  ✅ Added/Updated ${count} transactions.`, 'success');
+                            logP(`  ✅ Added/Updated ${count} transactions.`, 'success');
                             totalImported += count;
                         } else {
-                            log(`  No new transactions.`, 'info');
+                            logP(`  No new transactions.`, 'info');
                         }
                     } else {
-                        log(`  No transactions in date range.`, 'info');
+                        logP(`  No transactions in date range.`, 'info');
                     }
                 }
 
                 if (totalImported > 0) {
-                    log('Pushing changes to server...', 'info');
+                    logP('Pushing changes to server...', 'info');
                     await actual.sync(); 
-                    log(`Sync Complete. Total ${totalImported} new transactions.`, 'success');
+                    logP(`Sync Complete. Total ${totalImported} new transactions.`, 'success');
                 } else {
-                    log('Sync Complete. No data changes.', 'info');
+                    logP('Sync Complete. No data changes.', 'info');
                 }
             }
 
         } catch (e) {
             let msg = e.message;
-            log(`ERROR: ${msg}`, 'error');
+            logP(`ERROR: ${msg}`, 'error');
             if (process.send) process.send({ type: 'result', success: false, message: msg });
             process.exit(1);
         } finally {
@@ -461,11 +473,10 @@ if (process.env.WORKER_ACTION) {
 
 const app = express();
 
-let isProcessing = false;
+const processingProfiles = new Set(); // Track active profile IDs
 let logs = [];
-let lastSyncTime = null;
-const MAX_LOGS = 100;
-let currentTask = null;
+const MAX_LOGS = 200;
+let cronTasks = {}; // { profileId: task }
 
 const addLog = (message, type = 'info') => {
     const entry = { timestamp: Date.now(), message, type };
@@ -477,31 +488,71 @@ const addLog = (message, type = 'info') => {
 const ensureDataDir = () => {
     if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 };
+
+// --- CONFIG MANAGEMENT & MIGRATION ---
 const loadConfig = () => {
     ensureDataDir();
+    let config = {};
+    
     if (fs.existsSync(CONFIG_FILE)) {
         try { 
-            return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8')); 
+            config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8')); 
         } catch (e) {
             console.error(`Failed to load config from ${CONFIG_FILE}:`, e.message);
             addLog(`Config Load Error: ${e.message}`, 'error');
+            return { profiles: [] };
         }
-    } else {
-        console.log(`Config file not found at: ${CONFIG_FILE}`);
     }
-    return {};
-};
-const setupCron = (schedule) => {
-    if (currentTask) { currentTask.stop(); currentTask = null; }
-    if (schedule && cron.validate(schedule)) {
-        currentTask = cron.schedule(schedule, () => runSync());
-        addLog(`Schedule updated: ${schedule}`, 'info');
+
+    // --- MIGRATION: Old Flat Config -> New Profile Config ---
+    if (!config.profiles && (config.investecClientId || config.actualServerUrl)) {
+        addLog("Migrating legacy config to Profile format...", "info");
+        const defaultProfile = {
+            id: uuidv4(),
+            name: "Default Profile",
+            enabled: true,
+            investecClientId: config.investecClientId || '',
+            investecSecretId: config.investecSecretId || '',
+            investecApiKey: config.investecApiKey || '',
+            actualServerUrl: config.actualServerUrl || '',
+            actualPassword: config.actualPassword || '',
+            actualBudgetId: config.actualBudgetId || '',
+            syncSchedule: config.syncSchedule || ''
+        };
+        
+        const newConfig = {
+            profiles: [defaultProfile],
+            hostProjectRoot: config.hostProjectRoot
+        };
+        
+        saveConfig(newConfig); // Persist migration
+        return newConfig;
     }
+
+    // Ensure profiles array exists
+    if (!config.profiles) config.profiles = [];
+    return config;
 };
+
+const setupCron = (config) => {
+    // Stop all existing tasks
+    Object.values(cronTasks).forEach(task => task.stop());
+    cronTasks = {};
+
+    // Setup new tasks
+    config.profiles.forEach(p => {
+        if (p.enabled && p.syncSchedule && cron.validate(p.syncSchedule)) {
+            const task = cron.schedule(p.syncSchedule, () => runSync(p.id));
+            cronTasks[p.id] = task;
+            addLog(`Schedule set for "${p.name}": ${p.syncSchedule}`, 'info');
+        }
+    });
+};
+
 const saveConfig = (cfg) => {
     ensureDataDir();
     fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2));
-    setupCron(cfg.syncSchedule);
+    setupCron(cfg);
 };
 
 // --- CATEGORY MANAGEMENT ---
@@ -544,12 +595,15 @@ const spawnWorker = (action, payload) => {
 app.use(cors());
 app.use(bodyParser.json());
 
-app.get('/api/status', (req, res) => res.json({
-    isProcessing,
-    lastSyncTime,
-    version: SCRIPT_VERSION,
-    budgetLoaded: !!loadConfig().actualBudgetId 
-}));
+app.get('/api/status', (req, res) => {
+    const config = loadConfig();
+    res.json({
+        processingProfiles: Array.from(processingProfiles),
+        version: SCRIPT_VERSION,
+        // Check if any profile has a budget loaded (just a loose check if any ID exists)
+        profileCount: config.profiles.length
+    });
+});
 
 app.get('/api/logs', (req, res) => res.json(logs));
 app.get('/api/config', (req, res) => res.json(loadConfig()));
@@ -563,46 +617,72 @@ app.post('/api/categories', (req, res) => {
 });
 
 app.post('/api/test/investec', async (req, res) => {
-    const result = await spawnWorker('test-investec', req.body);
+    // Requires full profile data in body, or profileId to lookup
+    const profile = req.body;
+    const result = await spawnWorker('test-investec', profile);
     res.json(result);
 });
 
 app.post('/api/test/actual', async (req, res) => {
-    if (isProcessing) return res.json({ success: false, message: "Sync in progress" });
-    const result = await spawnWorker('test-actual', req.body);
+    const profile = req.body;
+    if (processingProfiles.has(profile.id)) return res.json({ success: false, message: "Sync in progress for this profile" });
+    
+    // Use temporary ID if not provided (e.g., testing before saving)
+    const testPayload = { ...profile, id: profile.id || 'test-temp' };
+    
+    const result = await spawnWorker('test-actual', testPayload);
     res.json(result);
 });
 
-const runSync = async () => {
-    if (isProcessing) { addLog("Sync skipped (already running)", "info"); return; }
+const runSync = async (profileId) => {
+    if (processingProfiles.has(profileId)) { 
+        addLog(`Sync skipped for ${profileId} (already running)`, "info"); 
+        return; 
+    }
     
     const config = loadConfig();
-    const categories = loadCategories(); // Load latest categories
+    const profile = config.profiles.find(p => p.id === profileId);
 
-    if (!config.investecClientId || !config.actualServerUrl) {
-        addLog("Config missing", "error");
+    if (!profile) {
+        addLog(`Cannot sync: Profile ${profileId} not found`, "error");
         return;
     }
 
-    isProcessing = true;
-    addLog("Starting Sync...", "info");
+    if (!profile.enabled) {
+        addLog(`Cannot sync: Profile "${profile.name}" is disabled`, "error");
+        return;
+    }
+
+    // Use profile-specific categories if available, otherwise fallback to global/default
+    const categories = profile.categories || loadCategories(); 
+
+    if (!profile.investecClientId || !profile.actualServerUrl) {
+        addLog(`Config missing for ${profile.name}`, "error");
+        return;
+    }
+
+    processingProfiles.add(profileId);
+    addLog(`Starting Sync: ${profile.name}...`, "info");
     
-    // Inject Categories into Payload
-    const payload = { ...config, categories };
+    const payload = { ...profile, categories };
 
     try {
         await spawnWorker('sync', payload);
-        lastSyncTime = Date.now();
     } catch (e) {
-        addLog("Sync spawn error", "error");
+        addLog(`Sync spawn error for ${profile.name}`, "error");
     } finally {
-        isProcessing = false;
+        processingProfiles.delete(profileId);
     }
 };
 
 app.post('/api/sync', (req, res) => {
-    if (isProcessing) return res.status(409).json({ status: 'busy' });
-    runSync();
+    const { profileId } = req.body;
+    
+    if (!profileId) return res.status(400).json({ error: "Missing profileId" });
+    
+    if (processingProfiles.has(profileId)) return res.status(409).json({ status: 'busy' });
+    
+    runSync(profileId);
     res.json({ status: 'started' });
 });
 
@@ -646,41 +726,6 @@ app.get('/api/git/branches', async (req, res) => {
         addLog(`Branch fetch error: ${e.message}`, 'error');
         res.status(500).json({ error: e.message });
     }
-});
-
-app.get('/api/git/current', (req, res) => {
-    const getBranch = (cmd) => new Promise(resolve => {
-        exec(cmd, { cwd: __dirname }, (err, stdout) => {
-            if (err || !stdout) resolve(null);
-            else resolve(stdout.trim());
-        });
-    });
-
-    (async () => {
-        // Method 1: Standard git command
-        let branch = await getBranch('git rev-parse --abbrev-ref HEAD');
-        
-        // Method 2: If we are in detached HEAD (e.g., CI or specific checkout), try getting ref name
-        if (!branch || branch === 'HEAD') {
-             const headRef = await getBranch('git symbolic-ref -q HEAD');
-             if (headRef) branch = headRef.replace('refs/heads/', '');
-        }
-
-        // Method 3: Check remotes to see what commit we are on
-        if (!branch || branch === 'HEAD') {
-             const hash = await getBranch('git rev-parse HEAD');
-             const allBranches = await getBranch('git branch -r --contains ' + hash);
-             if (allBranches) {
-                 // Clean up output like "origin/Dev", "origin/HEAD -> origin/main"
-                 const match = allBranches.split('\n')
-                    .map(b => b.trim().replace('origin/', ''))
-                    .find(b => !b.includes('HEAD'));
-                 if (match) branch = match;
-             }
-        }
-
-        res.json({ branch: branch || 'unknown' });
-    })();
 });
 
 app.get('/api/git/status', (req, res) => {
@@ -778,7 +823,9 @@ app.post('/api/update', (req, res) => {
 
     // Run update in background
     setTimeout(() => {
-        exec(`${hostDir} git pull && ${hostDir} docker compose up -d --build`, { cwd: __dirname }, (error, stdout, stderr) => {
+        // Use --force-recreate to ensure the container is actually replaced
+        const cmd = `${hostDir} git fetch --all && ${hostDir} git pull && ${hostDir} docker compose up -d --build --force-recreate`;
+        exec(cmd, { cwd: __dirname }, (error, stdout, stderr) => {
             if (error) {
                 console.error(`Update error: ${error}`);
                 addLog(`Update failed: ${error.message}`, 'error');
@@ -791,7 +838,7 @@ app.post('/api/update', (req, res) => {
 });
 
 const initialConfig = loadConfig();
-setupCron(initialConfig.syncSchedule);
+setupCron(initialConfig);
 
 app.use(express.static(path.join(__dirname, 'dist')));
 app.get('*', (req, res) => {
