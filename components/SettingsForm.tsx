@@ -25,10 +25,11 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
   const [profiles, setProfiles] = useState<SyncProfile[]>(config.profiles || []);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [hostProjectRoot, setHostProjectRoot] = useState(config.hostProjectRoot || '');
+  const [defaultCategories, setDefaultCategories] = useState<CategoryTree>({});
   
   // UI States
   const [showPass, setShowPass] = useState(false);
-  const [categories, setCategories] = useState<CategoryTree>({});
+  const [profileCategories, setProfileCategories] = useState<CategoryTree>({});
   const [jsonError, setJsonError] = useState<string | null>(null);
   const [jsonText, setJsonText] = useState('');
   const [isEditingCats, setIsEditingCats] = useState(false);
@@ -50,14 +51,11 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
     }
   }, [config]);
 
+  // Fetch default categories once
   useEffect(() => {
-    // Fetch categories
     fetch('/api/categories')
       .then(res => res.json())
-      .then(data => {
-        setCategories(data);
-        setJsonText(JSON.stringify(data, null, 2));
-      })
+      .then(data => setDefaultCategories(data))
       .catch(console.error);
       
     // Fetch Git Info
@@ -84,6 +82,18 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
     return () => clearInterval(interval);
   }, []);
 
+  // Sync profile categories state when selection changes
+  useEffect(() => {
+      if (selectedProfileId) {
+          const profile = profiles.find(p => p.id === selectedProfileId);
+          if (profile) {
+              const cats = profile.categories || defaultCategories;
+              setProfileCategories(cats);
+              setJsonText(JSON.stringify(cats, null, 2));
+          }
+      }
+  }, [selectedProfileId, profiles, defaultCategories]);
+
   const handleProfileChange = (field: keyof SyncProfile, value: any) => {
     if (!selectedProfileId) return;
     setProfiles(prev => prev.map(p => 
@@ -92,7 +102,11 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
   };
 
   const handleAddProfile = () => {
-    const newProfile = { ...EMPTY_PROFILE, id: uuidv4() };
+    const newProfile = { 
+        ...EMPTY_PROFILE, 
+        id: uuidv4(),
+        categories: defaultCategories // Initialize with defaults
+    };
     setProfiles(prev => [...prev, newProfile]);
     setSelectedProfileId(newProfile.id);
   };
@@ -138,18 +152,13 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
       }
   };
 
-  const handleSaveCategories = async () => {
+  const handleApplyCategories = () => {
     try {
       const parsed = JSON.parse(jsonText);
-      await fetch('/api/categories', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(parsed)
-      });
-      setCategories(parsed);
+      setProfileCategories(parsed);
+      handleProfileChange('categories', parsed); // Update the profile directly
       setIsEditingCats(false);
       setJsonError(null);
-      alert('Categories saved!');
     } catch (e: any) {
       setJsonError(e.message);
     }
@@ -406,6 +415,42 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
                             />
                         </div>
 
+                        {/* Category Mapping */}
+                        <div className="md:col-span-2 border-t border-slate-800 pt-4 mt-2">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-sm font-bold text-blue-400 uppercase tracking-wider">Category Mapping</h3>
+                                <button
+                                    onClick={() => setIsEditingCats(!isEditingCats)}
+                                    className="text-xs bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded text-slate-300 transition-colors"
+                                >
+                                    {isEditingCats ? 'Cancel' : 'Edit JSON'}
+                                </button>
+                            </div>
+                            
+                            {isEditingCats ? (
+                                <div className="space-y-4">
+                                    <textarea
+                                        value={jsonText}
+                                        onChange={(e) => setJsonText(e.target.value)}
+                                        className="w-full h-64 bg-slate-950 border border-slate-700 rounded-lg p-4 font-mono text-xs text-slate-300 focus:ring-2 focus:ring-blue-500 outline-none"
+                                    />
+                                    {jsonError && <p className="text-red-500 text-sm">{jsonError}</p>}
+                                    <button
+                                        onClick={handleApplyCategories}
+                                        className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-bold"
+                                    >
+                                        Apply Changes
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="bg-slate-950 rounded-lg border border-slate-800 p-4 max-h-64 overflow-y-auto">
+                                    <pre className="text-xs font-mono text-slate-400">
+                                        {JSON.stringify(profileCategories, null, 2)}
+                                    </pre>
+                                </div>
+                            )}
+                        </div>
+
                         {/* Schedule */}
                         <div className="md:col-span-2 border-t border-slate-800 pt-4 mt-2">
                             <h3 className="text-sm font-bold text-green-400 uppercase tracking-wider mb-4">Automation</h3>
@@ -439,45 +484,6 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
             )}
         </div>
       </div>
-
-      {/* Global Categories (Collapsible?) */}
-      <section className="bg-slate-900 p-6 rounded-xl border border-slate-800">
-        <div className="flex justify-between items-center mb-4">
-            <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                <div className="w-1 h-6 bg-blue-500 rounded-full"></div>
-                Global Category Mapping
-            </h2>
-            <button
-                onClick={() => setIsEditingCats(!isEditingCats)}
-                className="text-sm bg-slate-800 hover:bg-slate-700 px-3 py-1 rounded text-slate-300 transition-colors"
-            >
-                {isEditingCats ? 'Cancel' : 'Edit JSON'}
-            </button>
-        </div>
-
-        {isEditingCats ? (
-            <div className="space-y-4">
-                <textarea
-                    value={jsonText}
-                    onChange={(e) => setJsonText(e.target.value)}
-                    className="w-full h-64 bg-slate-950 border border-slate-700 rounded-lg p-4 font-mono text-xs text-slate-300 focus:ring-2 focus:ring-blue-500 outline-none"
-                />
-                {jsonError && <p className="text-red-500 text-sm">{jsonError}</p>}
-                <button
-                    onClick={handleSaveCategories}
-                    className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-bold"
-                >
-                    Save Categories
-                </button>
-            </div>
-        ) : (
-            <div className="bg-slate-950 rounded-lg border border-slate-800 p-4 max-h-64 overflow-y-auto">
-                <pre className="text-xs font-mono text-slate-400">
-                    {JSON.stringify(categories, null, 2)}
-                </pre>
-            </div>
-        )}
-      </section>
 
       {/* Save Button */}
       <div className="sticky bottom-6 flex justify-end">

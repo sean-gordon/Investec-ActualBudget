@@ -653,7 +653,8 @@ const runSync = async (profileId) => {
         return;
     }
 
-    const categories = loadCategories(); 
+    // Use profile-specific categories if available, otherwise fallback to global/default
+    const categories = profile.categories || loadCategories(); 
 
     if (!profile.investecClientId || !profile.actualServerUrl) {
         addLog(`Config missing for ${profile.name}`, "error");

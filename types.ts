@@ -9,6 +9,7 @@ export interface SyncProfile {
   actualPassword?: string;
   actualBudgetId: string;
   syncSchedule: string; // Cron expression
+  categories?: CategoryTree;
 }
 
 export interface AppConfig {
