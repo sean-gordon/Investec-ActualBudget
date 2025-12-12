@@ -822,7 +822,9 @@ app.post('/api/update', (req, res) => {
 
     // Run update in background
     setTimeout(() => {
-        exec(`${hostDir} git pull && ${hostDir} docker compose up -d --build`, { cwd: __dirname }, (error, stdout, stderr) => {
+        // Use --force-recreate to ensure the container is actually replaced
+        const cmd = `${hostDir} git fetch --all && ${hostDir} git pull && ${hostDir} docker compose up -d --build --force-recreate`;
+        exec(cmd, { cwd: __dirname }, (error, stdout, stderr) => {
             if (error) {
                 console.error(`Update error: ${error}`);
                 addLog(`Update failed: ${error.message}`, 'error');
