@@ -165,6 +165,21 @@ export default function App() {
   const mergedLogs = useMemo(() => {
     if (logViewMode === 'file') return updateLogData;
 
+    // 1. Filter System Logs based on Active Profile
+    const activeProfile = config.profiles.find(p => p.id === activeProfileId);
+    const filteredSystemLogs = systemLogs.filter(log => {
+        if (!activeProfile) return true; // Show all if no profile selected (shouldn't happen)
+        
+        const match = log.message.match(/^\[(.*?)\]/);
+        if (match) {
+            // Log starts with [Profile Name]. Only keep if matches active profile.
+            // We use trim() to be safe.
+            return match[1].trim() === activeProfile.name.trim();
+        }
+        // Generic logs (no [Profile Name] prefix) - keep them.
+        return true;
+    });
+
     const parsedAiLogs: LogEntry[] = [];
     
     if (rawAiLogs) {

@@ -1,3 +1,14 @@
+# Release v6.4.4 - Smart Log Filtering
+
+## 🚀 Key Highlights
+This release improves the "Live Logs" experience by intelligently filtering the System Logs. Now, when you select a profile, you will only see sync logs relevant to **that specific profile** (along with general system events), eliminating clutter from other profiles running in the background.
+
+### ✨ Improvements
+*   **Contextual System Logs**: Filtered out log entries from other profiles when viewing a specific profile's dashboard.
+*   **Cleaner Debugging**: Makes it much easier to focus on a specific sync job's progress.
+
+---
+
 # Release v6.4.3 - Update History Viewer
 
 ## 🚀 Key Highlights
