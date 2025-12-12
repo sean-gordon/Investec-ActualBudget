@@ -46,7 +46,7 @@ const CONFIG_FILE = path.join(DATA_DIR, 'settings.json');
 const CATEGORIES_FILE = path.join(DATA_DIR, 'categories.json');
 const ACTUAL_DATA_DIR = path.join(DATA_DIR, 'actual-data');
 const UPDATE_LOG = path.join(DATA_DIR, 'update.log');
-const SCRIPT_VERSION = "6.4.1 - Update Debugging";
+const SCRIPT_VERSION = "6.4.2 - Integrated Log Viewer";
 
 // Disable Self-Signed Cert Rejection
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
@@ -833,7 +833,7 @@ app.get('/api/docker/logs', (req, res) => {
         return res.status(400).json({ error: 'Invalid container name' });
     }
 
-    exec(`docker logs --tail 100 ${container}`, (err, stdout, stderr) => {
+    exec(`docker logs --timestamps --tail 100 ${container}`, (err, stdout, stderr) => {
         // Docker logs often go to stderr even if not errors (e.g. app logs)
         // We combine them or just return what we have
         const combined = (stdout || '') + (stderr || '');

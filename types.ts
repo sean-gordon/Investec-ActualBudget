@@ -26,6 +26,7 @@ export interface LogEntry {
   timestamp: number;
   message: string;
   type: 'info' | 'error' | 'success';
+  source?: 'System' | 'Actual AI';
 }
 
 export interface InvestecTokenResponse {

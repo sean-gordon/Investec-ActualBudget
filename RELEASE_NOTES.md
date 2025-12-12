@@ -1,3 +1,20 @@
+# Release v6.4.2 - Integrated Log Viewer
+
+## 🚀 Key Highlights
+This release unifies the logging experience. Now, clicking on a profile in the dashboard automatically loads its corresponding Actual AI logs alongside the system logs.
+
+### ✨ New Features
+*   **Integrated Log Console**: The "Live Logs" panel now combines:
+    *   **System Logs**: Sync events, errors, and status updates (Blue Badge).
+    *   **Actual AI Logs**: Real-time output from your AI classification container (Purple Badge).
+*   **Contextual Selection**: Clicking a row in the "Sync Profiles" table instantly switches the log view to show relevant information for that profile.
+*   **Default Selection**: The first active profile is automatically selected on load.
+
+### 🛠 Fixes
+*   **Log Parsing**: Added timestamp support to Docker log fetching to ensure correct sorting in the merged view.
+
+---
+
 # Release v6.4.1 - Update Debugging
 
 ## 🚀 Key Highlights
