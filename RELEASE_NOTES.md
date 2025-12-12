@@ -1,3 +1,16 @@
+# Release v6.3.2 - Scrolling & Update Fixes
+
+## 🚀 Key Highlights
+This release addresses critical usability issues, ensuring the dashboard works smoothly on all devices and updates reliably.
+
+### 🛠 Fixes
+*   **Reliable Updates**: Hardened the self-update command to force a container rebuild (`--force-recreate`). This ensures you're always running the latest code after clicking "Update".
+*   **Scroll Lock**: Fixed an issue where the Live Logs panel would scroll the entire webpage down. Now, only the log panel itself scrolls, keeping the main dashboard layout stable and accessible.
+*   **Layout Polish**: Removed the redundant "Server Time" card and optimized the dashboard to fit perfectly within the browser viewport (no double scrollbars).
+*   **Profile Toggling**: Fixed a bug where toggling one profile's status (Enable/Disable) could inadvertently affect others.
+
+---
+
 # Release v6.3.1 - Enhanced Profile Management
 
 ## 🚀 Key Highlights
