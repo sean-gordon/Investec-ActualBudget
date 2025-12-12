@@ -510,6 +510,7 @@ const loadConfig = () => {
         const defaultProfile = {
             id: uuidv4(),
             name: "Default Profile",
+            enabled: true,
             investecClientId: config.investecClientId || '',
             investecSecretId: config.investecSecretId || '',
             investecApiKey: config.investecApiKey || '',
@@ -540,7 +541,7 @@ const setupCron = (config) => {
 
     // Setup new tasks
     config.profiles.forEach(p => {
-        if (p.syncSchedule && cron.validate(p.syncSchedule)) {
+        if (p.enabled && p.syncSchedule && cron.validate(p.syncSchedule)) {
             const task = cron.schedule(p.syncSchedule, () => runSync(p.id));
             cronTasks[p.id] = task;
             addLog(`Schedule set for "${p.name}": ${p.syncSchedule}`, 'info');
@@ -644,6 +645,11 @@ const runSync = async (profileId) => {
 
     if (!profile) {
         addLog(`Cannot sync: Profile ${profileId} not found`, "error");
+        return;
+    }
+
+    if (!profile.enabled) {
+        addLog(`Cannot sync: Profile "${profile.name}" is disabled`, "error");
         return;
     }
 

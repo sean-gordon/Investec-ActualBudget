@@ -1,6 +1,7 @@
 export interface SyncProfile {
   id: string;
   name: string;
+  enabled: boolean;
   investecClientId: string;
   investecSecretId: string;
   investecApiKey: string;

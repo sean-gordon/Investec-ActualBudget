@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Save, Eye, EyeOff, RotateCcw, GitBranch, Plus, Trash2, Copy } from 'lucide-react';
+import { Save, Eye, EyeOff, RotateCcw, GitBranch, Plus, Trash2, Copy, CheckCircle, AlertTriangle, Play } from 'lucide-react';
 import { AppConfig, CategoryTree, SyncProfile } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -11,6 +11,7 @@ interface SettingsFormProps {
 const EMPTY_PROFILE: SyncProfile = {
     id: '',
     name: 'New Profile',
+    enabled: true,
     investecClientId: '',
     investecSecretId: '',
     investecApiKey: '',
@@ -31,6 +32,7 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
   const [jsonError, setJsonError] = useState<string | null>(null);
   const [jsonText, setJsonText] = useState('');
   const [isEditingCats, setIsEditingCats] = useState(false);
+  const [testStatus, setTestStatus] = useState<{ [key: string]: 'idle' | 'loading' | 'success' | 'error' }>({});
   
   // Git State
   const [branches, setBranches] = useState<string[]>([]);
@@ -82,7 +84,7 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
     return () => clearInterval(interval);
   }, []);
 
-  const handleProfileChange = (field: keyof SyncProfile, value: string) => {
+  const handleProfileChange = (field: keyof SyncProfile, value: any) => {
     if (!selectedProfileId) return;
     setProfiles(prev => prev.map(p => 
         p.id === selectedProfileId ? { ...p, [field]: value } : p
@@ -110,6 +112,30 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
       const newProfile = { ...p, id: uuidv4(), name: `${p.name} (Copy)` };
       setProfiles(prev => [...prev, newProfile]);
       setSelectedProfileId(newProfile.id);
+  };
+
+  const runTest = async (type: 'investec' | 'actual', profile: SyncProfile) => {
+      setTestStatus(prev => ({ ...prev, [type]: 'loading' }));
+      try {
+          const res = await fetch(`/api/test/${type}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(profile)
+          });
+          const result = await res.json();
+          if (result.success) {
+              setTestStatus(prev => ({ ...prev, [type]: 'success' }));
+              alert(result.message);
+          } else {
+              setTestStatus(prev => ({ ...prev, [type]: 'error' }));
+              alert(`Error: ${result.message}`);
+          }
+      } catch (e: any) {
+          setTestStatus(prev => ({ ...prev, [type]: 'error' }));
+          alert(`Network Error: ${e.message}`);
+      } finally {
+          setTimeout(() => setTestStatus(prev => ({ ...prev, [type]: 'idle' })), 3000);
+      }
   };
 
   const handleSaveCategories = async () => {
@@ -191,7 +217,7 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
                     <button
                         onClick={handleBranchSwitch}
                         disabled={isSwitching || (selectedBranch === currentBranch && !updateAvailable)}
-                        className={`px-4 py-2 rounded-lg font-bold transition-all text-sm whitespace-nowrap ${isSwitching || (selectedBranch === currentBranch && !updateAvailable) ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-orange-600 hover:bg-orange-500 text-white'}`}
+                        className={`px-4 py-2 rounded-lg font-bold transition-all text-sm whitespace-nowrap ${ isSwitching || (selectedBranch === currentBranch && !updateAvailable) ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-orange-600 hover:bg-orange-500 text-white'}`}
                     >
                         {isSwitching ? '...' : 
                             selectedBranch === currentBranch && updateAvailable ? 'Upgrade' : 
@@ -219,9 +245,12 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
                     <div 
                         key={p.id}
                         onClick={() => setSelectedProfileId(p.id)}
-                        className={`p-3 rounded-lg cursor-pointer border transition-all flex justify-between items-center group ${selectedProfileId === p.id ? 'bg-investec-900 border-investec-500 text-white' : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-600'}`}
+                        className={`p-3 rounded-lg cursor-pointer border transition-all flex justify-between items-center group ${ selectedProfileId === p.id ? 'bg-investec-900 border-investec-500 text-white' : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-600'}`}
                     >
-                        <span className="truncate font-medium">{p.name}</span>
+                        <div className="flex items-center gap-2 truncate">
+                             <div className={`w-2 h-2 rounded-full ${p.enabled ? 'bg-green-500' : 'bg-slate-600'}`}></div>
+                             <span className={`font-medium ${!p.enabled && 'text-slate-500 line-through'}`}>{p.name}</span>
+                        </div>
                         <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button 
                                 onClick={(e) => { e.stopPropagation(); handleDuplicateProfile(p.id); }}
@@ -253,6 +282,19 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
                             <div className="w-1 h-6 bg-investec-500 rounded-full"></div>
                             Editing: {selectedProfile.name}
                         </h2>
+                        
+                        <div className="flex items-center gap-3">
+                            <label className="relative inline-flex items-center cursor-pointer">
+                                <input 
+                                    type="checkbox" 
+                                    className="sr-only peer"
+                                    checked={selectedProfile.enabled}
+                                    onChange={(e) => handleProfileChange('enabled', e.target.checked)}
+                                />
+                                <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
+                                <span className="ml-3 text-sm font-medium text-slate-300">Enabled</span>
+                            </label>
+                        </div>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -267,8 +309,23 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
                         </div>
 
                         {/* Investec */}
+                        <div className="md:col-span-2 border-t border-slate-800 pt-4 mt-2">
+                             <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-sm font-bold text-investec-400 uppercase tracking-wider">Investec API</h3>
+                                <button
+                                    onClick={() => runTest('investec', selectedProfile)}
+                                    disabled={testStatus.investec === 'loading'}
+                                    className="text-xs flex items-center gap-2 bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded text-slate-300 transition-colors"
+                                >
+                                    {testStatus.investec === 'loading' ? 'Testing...' : 'Test Connection'}
+                                    {testStatus.investec === 'success' && <CheckCircle size={14} className="text-green-500" />}
+                                    {testStatus.investec === 'error' && <AlertTriangle size={14} className="text-red-500" />}
+                                </button>
+                             </div>
+                        </div>
+
                         <div className="space-y-2">
-                            <label className="text-sm text-slate-400">Investec Client ID</label>
+                            <label className="text-sm text-slate-400">Client ID</label>
                             <input
                                 type="text"
                                 value={selectedProfile.investecClientId}
@@ -277,7 +334,7 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
                             />
                         </div>
                         <div className="space-y-2">
-                            <label className="text-sm text-slate-400">Investec Secret ID</label>
+                            <label className="text-sm text-slate-400">Secret ID</label>
                             <div className="relative">
                                 <input
                                     type={showPass ? "text" : "password"}
@@ -295,7 +352,7 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
                             </div>
                         </div>
                         <div className="space-y-2 md:col-span-2">
-                            <label className="text-sm text-slate-400">Investec API Key</label>
+                            <label className="text-sm text-slate-400">API Key</label>
                             <input
                                 type="password"
                                 value={selectedProfile.investecApiKey}
@@ -305,8 +362,23 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
                         </div>
 
                         {/* Actual */}
+                        <div className="md:col-span-2 border-t border-slate-800 pt-4 mt-2">
+                             <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-sm font-bold text-purple-400 uppercase tracking-wider">Actual Budget</h3>
+                                <button
+                                    onClick={() => runTest('actual', selectedProfile)}
+                                    disabled={testStatus.actual === 'loading'}
+                                    className="text-xs flex items-center gap-2 bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded text-slate-300 transition-colors"
+                                >
+                                    {testStatus.actual === 'loading' ? 'Testing...' : 'Test Connection'}
+                                    {testStatus.actual === 'success' && <CheckCircle size={14} className="text-green-500" />}
+                                    {testStatus.actual === 'error' && <AlertTriangle size={14} className="text-red-500" />}
+                                </button>
+                             </div>
+                        </div>
+
                         <div className="space-y-2">
-                            <label className="text-sm text-slate-400">Actual Server URL</label>
+                            <label className="text-sm text-slate-400">Server URL</label>
                             <input
                                 type="text"
                                 value={selectedProfile.actualServerUrl}
@@ -335,6 +407,10 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
                         </div>
 
                         {/* Schedule */}
+                        <div className="md:col-span-2 border-t border-slate-800 pt-4 mt-2">
+                            <h3 className="text-sm font-bold text-green-400 uppercase tracking-wider mb-4">Automation</h3>
+                        </div>
+
                         <div className="space-y-2 md:col-span-2">
                             <label className="text-sm text-slate-400">Cron Schedule</label>
                             <div className="flex gap-2">
@@ -357,7 +433,7 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
                     </div>
                 </div>
             ) : (
-                <div className="h-full flex items-center justify-center text-slate-500 bg-slate-900 rounded-xl border border-slate-800">
+                <div className="h-full flex items-center justify-center text-slate-500 bg-slate-900 rounded-xl border border-slate-800 min-h-[400px]">
                     <p>Select a profile to edit or create a new one.</p>
                 </div>
             )}
