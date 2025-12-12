@@ -173,15 +173,24 @@ export default function App() {
     // 1. Filter System Logs based on Active Profile
     const activeProfile = config.profiles.find(p => p.id === activeProfileId);
     const filteredSystemLogs = systemLogs.filter(log => {
-        if (!activeProfile) return true; // Show all if no profile selected (shouldn't happen)
+        if (!activeProfile) return true; // Show all if no profile selected
         
+        // Check for [Profile Name] prefix (Worker logs)
         const match = log.message.match(/^\[(.*?)\]/);
         if (match) {
-            // Log starts with [Profile Name]. Only keep if matches active profile.
-            // We use trim() to be safe.
             return match[1].trim() === activeProfile.name.trim();
         }
-        // Generic logs (no [Profile Name] prefix) - keep them.
+
+        // Handle generic logs (Scheduler, etc.)
+        // If the log mentions another profile's name explicitly, hide it.
+        // If it mentions the current profile (e.g. "Schedule set for 'Active'"), keep it.
+        // If it mentions no profiles (e.g. "System Online"), keep it.
+        const otherProfiles = config.profiles.filter(p => p.id !== activeProfileId);
+        const mentionsOther = otherProfiles.some(p => log.message.includes(p.name));
+        const mentionsCurrent = log.message.includes(activeProfile.name);
+
+        if (mentionsOther && !mentionsCurrent) return false;
+
         return true;
     });
 

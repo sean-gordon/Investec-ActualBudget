@@ -1,3 +1,13 @@
+# Release v6.4.6 - Strict Log Isolation
+
+## 🚀 Key Highlights
+This release perfects the log filtering logic. System events that mention specific profiles (like "Schedule set for...") are now correctly filtered. You will no longer see schedule notifications for Profile B when looking at Profile A.
+
+### 🛠 Fixes
+*   **Contextual Filtering**: The log viewer now scans generic system messages for profile names. If a message mentions another profile and not the current one, it is hidden.
+
+---
+
 # Release v6.4.5 - Fast Log Switching
 
 ## 🚀 Key Highlights
