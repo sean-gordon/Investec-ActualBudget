@@ -45,7 +45,7 @@ const DATA_DIR = path.join(__dirname, 'data');
 const CONFIG_FILE = path.join(DATA_DIR, 'settings.json');
 const CATEGORIES_FILE = path.join(DATA_DIR, 'categories.json');
 const ACTUAL_DATA_DIR = path.join(DATA_DIR, 'actual-data');
-const SCRIPT_VERSION = "6.3.0 - Multi-Profile Support";
+const SCRIPT_VERSION = "6.3.1 - Enhanced Profile Management";
 
 // Disable Self-Signed Cert Rejection
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";

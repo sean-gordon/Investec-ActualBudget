@@ -208,20 +208,22 @@ export default function App() {
       </header>
 
       {/* Content */}
-      <main className="flex-1 overflow-y-auto p-8">
+      <main className="flex-1 overflow-hidden p-8">
         <div className="max-w-7xl mx-auto h-full">
           
           {view === 'settings' ? (
-            <SettingsForm config={config} onSave={handleSaveSettings} />
+            <div className="h-full overflow-y-auto">
+                <SettingsForm config={config} onSave={handleSaveSettings} />
+            </div>
           ) : (
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-8 h-full">
               
               {/* Left Col: Profiles Table */}
-              <div className="xl:col-span-2 flex flex-col gap-6">
+              <div className="xl:col-span-2 flex flex-col gap-6 h-full overflow-hidden">
                 
-                {/* Profiles Table */}
-                <div className="bg-slate-900 rounded-xl border border-slate-800 shadow-lg overflow-hidden flex-none">
-                    <div className="px-6 py-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/50">
+                {/* Profiles Table (Flex-1 to grow/shrink) */}
+                <div className="bg-slate-900 rounded-xl border border-slate-800 shadow-lg overflow-hidden flex flex-col flex-1 min-h-0">
+                    <div className="px-6 py-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/50 flex-none">
                         <h2 className="text-lg font-semibold text-white flex items-center gap-2">
                             <CreditCard size={18} className="text-investec-500" />
                             Sync Profiles
@@ -234,15 +236,15 @@ export default function App() {
                         </button>
                     </div>
 
-                    <div className="overflow-x-auto">
+                    <div className="flex-1 overflow-auto">
                         <table className="w-full text-left text-sm text-slate-400">
-                            <thead className="bg-slate-950/50 text-xs uppercase text-slate-500 font-semibold">
+                            <thead className="bg-slate-950/50 text-xs uppercase text-slate-500 font-semibold sticky top-0 z-10">
                                 <tr>
-                                    <th className="px-6 py-3">Status</th>
-                                    <th className="px-6 py-3">Profile Name</th>
-                                    <th className="px-6 py-3">Target</th>
-                                    <th className="px-6 py-3">Schedule</th>
-                                    <th className="px-6 py-3 text-right">Actions</th>
+                                    <th className="px-6 py-3 bg-slate-900">Status</th>
+                                    <th className="px-6 py-3 bg-slate-900">Profile Name</th>
+                                    <th className="px-6 py-3 bg-slate-900">Target</th>
+                                    <th className="px-6 py-3 bg-slate-900">Schedule</th>
+                                    <th className="px-6 py-3 text-right bg-slate-900">Actions</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-800/50">
@@ -330,7 +332,7 @@ export default function App() {
                     </div>
                 </div>
 
-                {/* System Status Cards */}
+                {/* System Status Cards (Fixed Height) */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 flex-none">
                     <div className="bg-slate-900 p-5 rounded-xl border border-slate-800 flex items-center gap-4">
                         <div className={`p-3 rounded-full ${isConnected ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}`}>
@@ -356,7 +358,7 @@ export default function App() {
               </div>
 
               {/* Right Col: Logs */}
-              <div className="xl:col-span-1 flex flex-col h-full min-h-[400px]">
+              <div className="xl:col-span-1 flex flex-col h-full overflow-hidden">
                 <div className="bg-slate-900 rounded-xl border border-slate-800 shadow-lg flex flex-col h-full overflow-hidden">
                     <div className="px-5 py-4 border-b border-slate-800 bg-slate-900/50 flex-none">
                          <h2 className="text-lg font-semibold text-white">Live Logs</h2>
