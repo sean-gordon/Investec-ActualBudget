@@ -1,5 +1,5 @@
 # Stage 1: Build the React application
-FROM node:20-slim as builder
+FROM node:20.19.6-trixie-slim as builder
 
 # Install build tools required for better-sqlite3 (native module used by Actual API)
 RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
@@ -19,7 +19,7 @@ COPY . .
 RUN npm run build
 
 # Stage 2: Production Server
-FROM node:20-slim
+FROM node:20.19.6-trixie-slim
 
 WORKDIR /app
 
