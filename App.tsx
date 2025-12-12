@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Activity, Settings, Play, CreditCard, ExternalLink, Wifi, Clock, Download, Github } from 'lucide-react';
-import { AppConfig, LogEntry } from './types';
+import { Activity, Settings, Play, CreditCard, ExternalLink, Wifi, Clock, Download, Github, Plus, Trash2, Edit2 } from 'lucide-react';
+import { AppConfig, LogEntry, SyncProfile } from './types';
 import { SettingsForm } from './components/SettingsForm';
 import { LogConsole } from './components/LogConsole';
 
@@ -9,20 +9,13 @@ const API_BASE = '/api';
 export default function App() {
   const [view, setView] = useState<'dashboard' | 'settings'>('dashboard');
   const [config, setConfig] = useState<AppConfig>({
-    investecClientId: '',
-    investecSecretId: '',
-    investecApiKey: '',
-    actualServerUrl: '',
-    actualBudgetId: '',
-    actualPassword: '',
-    syncSchedule: ''
+    profiles: [],
+    hostProjectRoot: ''
   });
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [isConnected, setIsConnected] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [processingProfiles, setProcessingProfiles] = useState<string[]>([]);
   const [serverVersion, setServerVersion] = useState<string>('Unknown');
-  const [lastSyncTime, setLastSyncTime] = useState<number | null>(null);
-  const [isBudgetLoaded, setIsBudgetLoaded] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<{ available: boolean; latest: string } | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
 
@@ -64,10 +57,8 @@ export default function App() {
         // 1. Get Status
         const statusData = await fetchJson(`${API_BASE}/status`);
         setIsConnected(true);
-        setIsProcessing(statusData.isProcessing);
+        setProcessingProfiles(statusData.processingProfiles || []);
         setServerVersion(statusData.version);
-        setIsBudgetLoaded(statusData.budgetLoaded);
-        if (statusData.lastSyncTime) setLastSyncTime(statusData.lastSyncTime);
 
         // 2. Get Logs
         const logsData = await fetchJson(`${API_BASE}/logs`);
@@ -97,18 +88,21 @@ export default function App() {
     }
   };
 
-  const triggerSync = async () => {
-    if (isProcessing) return;
+  const triggerSync = async (profileId: string) => {
+    if (processingProfiles.includes(profileId)) return;
     
     // Optimistic update
-    setIsProcessing(true);
+    setProcessingProfiles(prev => [...prev, profileId]);
     
     try {
-      await fetchJson(`${API_BASE}/sync`, { method: 'POST' });
-      // Don't set isProcessing to false here; wait for the poll to confirm it started or finished
+      await fetchJson(`${API_BASE}/sync`, { 
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ profileId })
+      });
     } catch (e) {
       console.error("Failed to trigger sync:", e);
-      setIsProcessing(false);
+      setProcessingProfiles(prev => prev.filter(id => id !== profileId));
       alert("Failed to start sync. Check server connection.");
     }
   };
@@ -171,45 +165,76 @@ export default function App() {
 
       {/* Content */}
       <main className="flex-1 overflow-y-auto p-8">
-        <div className="max-w-5xl mx-auto">
+        <div className="max-w-6xl mx-auto">
           
           {view === 'settings' ? (
             <SettingsForm config={config} onSave={handleSaveSettings} />
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               
-              {/* Left Col: Controls */}
+              {/* Left Col: Profiles & Controls */}
               <div className="lg:col-span-1 space-y-6">
-                <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-lg">
-                  <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-                    <CreditCard size={18} className="text-investec-500" />
-                    Manual Control
-                  </h2>
-                  
-                  <p className="text-sm text-slate-400 mb-6 leading-relaxed">
-                    Trigger the synchronization process manually. 
-                  </p>
+                
+                {/* Profiles List */}
+                {config.profiles && config.profiles.length > 0 ? (
+                    config.profiles.map(profile => {
+                        const isSyncing = processingProfiles.includes(profile.id);
+                        return (
+                            <div key={profile.id} className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-lg relative overflow-hidden">
+                                {isSyncing && (
+                                    <div className="absolute top-0 left-0 w-full h-1 bg-investec-500 animate-loading-bar"></div>
+                                )}
+                                <div className="flex justify-between items-start mb-4">
+                                    <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                                        <CreditCard size={18} className="text-investec-500" />
+                                        {profile.name}
+                                    </h2>
+                                    {isSyncing && <span className="text-xs text-investec-400 animate-pulse font-mono">SYNCING...</span>}
+                                </div>
+                                
+                                <p className="text-xs text-slate-500 mb-4 font-mono truncate">
+                                    Target: {profile.actualServerUrl}
+                                </p>
 
-                  <button
-                    onClick={triggerSync}
-                    disabled={isProcessing || !isConnected}
-                    className={`w-full flex items-center justify-center gap-2 py-3 rounded-lg font-bold transition-all ${
-                      isProcessing || !isConnected
-                        ? 'bg-slate-800 text-slate-500 cursor-not-allowed' 
-                        : 'bg-investec-500 hover:bg-yellow-400 text-black shadow-lg shadow-yellow-900/20'
-                    }`}
-                  >
-                    {isProcessing ? (
-                      <div className="animate-spin h-5 w-5 border-2 border-slate-500 border-t-transparent rounded-full" />
-                    ) : (
-                      <Play size={20} fill="currentColor" />
-                    )}
-                    <span>{isProcessing ? 'Syncing...' : 'Start Sync Now'}</span>
-                  </button>
-                </div>
+                                <button
+                                    onClick={() => triggerSync(profile.id)}
+                                    disabled={isSyncing || !isConnected}
+                                    className={`w-full flex items-center justify-center gap-2 py-3 rounded-lg font-bold transition-all ${
+                                    isSyncing || !isConnected
+                                        ? 'bg-slate-800 text-slate-500 cursor-not-allowed' 
+                                        : 'bg-investec-500 hover:bg-yellow-400 text-black shadow-lg shadow-yellow-900/20'
+                                    }`}
+                                >
+                                    {isSyncing ? (
+                                    <div className="animate-spin h-5 w-5 border-2 border-slate-500 border-t-transparent rounded-full" />
+                                    ) : (
+                                    <Play size={20} fill="currentColor" />
+                                    )}
+                                    <span>{isSyncing ? 'Syncing...' : 'Sync Now'}</span>
+                                </button>
+                                
+                                <div className="mt-4 pt-4 border-t border-slate-800 flex justify-between text-xs text-slate-500">
+                                    <span>Schedule: {profile.syncSchedule || 'None'}</span>
+                                    {/* Placeholder for specific last sync time if we track it per profile later */}
+                                </div>
+                            </div>
+                        );
+                    })
+                ) : (
+                    <div className="bg-slate-900 p-8 rounded-xl border border-slate-800 text-center">
+                        <p className="text-slate-400 mb-4">No sync profiles configured.</p>
+                        <button 
+                            onClick={() => setView('settings')}
+                            className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold"
+                        >
+                            Create Profile
+                        </button>
+                    </div>
+                )}
 
+                {/* System Status */}
                 <div className="bg-slate-900 p-6 rounded-xl border border-slate-800">
-                   <h3 className="text-sm font-semibold text-slate-300 mb-2">Status</h3>
+                   <h3 className="text-sm font-semibold text-slate-300 mb-2">System Status</h3>
                    <div className="flex items-center gap-3 mb-3">
                       <Wifi size={16} className={isConnected ? "text-green-500" : "text-red-500"} />
                       <span className="text-sm text-slate-400">
@@ -217,19 +242,10 @@ export default function App() {
                       </span>
                    </div>
                    <div className="flex items-center gap-3 mb-3">
-                      <Clock size={16} className="text-slate-500" />
+                      <div className={`w-3 h-3 rounded-full ${processingProfiles.length > 0 ? 'bg-blue-500 animate-pulse' : 'bg-slate-600'}`}></div>
                       <span className="text-sm text-slate-400">
-                        Last Sync: <span className="text-slate-200">{lastSyncTime ? new Date(lastSyncTime).toLocaleTimeString() : 'Never'}</span>
+                        Active Tasks: <span className="text-slate-200">{processingProfiles.length}</span>
                       </span>
-                   </div>
-                   <div className="flex items-center gap-3 mb-3">
-                      <div className={`w-3 h-3 rounded-full ${isBudgetLoaded ? 'bg-indigo-500' : 'bg-slate-600'}`}></div>
-                      <span className="text-sm text-slate-400">
-                        Budget Loaded: <span className="text-slate-200">{isBudgetLoaded ? 'Yes' : 'No'}</span>
-                      </span>
-                   </div>
-                   <div className="text-xs text-slate-500 border-t border-slate-800 pt-3">
-                      Schedule: <span className="font-mono text-slate-300">{config.syncSchedule || 'Disabled'}</span>
                    </div>
                 </div>
               </div>
