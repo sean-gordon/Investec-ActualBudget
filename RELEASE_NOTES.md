@@ -1,3 +1,27 @@
+# Release v6.3.0 - Multi-Profile Support
+
+## 🚀 Key Highlights
+This release introduces full support for **Sync Profiles**. You can now configure multiple independent Investec accounts and sync them to completely different Actual Budget instances or files.
+
+### ✨ New Features
+*   **Multi-Profile Management**: 
+    *   Manage multiple configurations (Profiles) from a single dashboard.
+    *   Create, Edit, Duplicate, and Delete profiles easily.
+    *   Each profile has its own:
+        *   Investec API Credentials.
+        *   Actual Budget Server URL & Port (e.g., `localhost:5006` vs `localhost:5007`).
+        *   Budget ID & Password.
+        *   Cron Schedule.
+*   **Concurrent Syncing**: The system can now run sync jobs for different profiles in parallel without conflict.
+*   **Dashboard Upgrade**: The main dashboard now lists all your active profiles with individual "Sync Now" controls and status indicators.
+*   **Automatic Migration**: Existing configurations are automatically migrated to a "Default Profile" upon update.
+
+### 🛠 Improvements
+*   **Data Isolation**: Each profile uses a unique, isolated temporary data directory during sync to prevent file locking issues.
+*   **Settings UI**: Completely redesigned Settings page with a Master-Detail view for better usability.
+
+---
+
 # Release v6.2.2 - Reliable Self-Updates
 
 ## 🚀 Key Highlights
