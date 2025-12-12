@@ -1,3 +1,13 @@
+# Release v6.3.3 - Update Mechanism Fix
+
+## 🚀 Key Highlights
+This release fixes a critical bug in the self-update system where the `docker compose` command was missing from the container, preventing automatic updates from completing successfully.
+
+### 🛠 Fixes
+*   **Self-Update Repair**: Added `docker-compose-plugin` to the Docker image. This ensures the update command running inside the container can successfully rebuild and restart the application.
+
+---
+
 # Release v6.3.2 - Scrolling & Update Fixes
 
 ## 🚀 Key Highlights
