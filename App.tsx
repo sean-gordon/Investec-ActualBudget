@@ -134,6 +134,11 @@ export default function App() {
     return () => clearInterval(interval);
   }, [logViewMode]);
 
+  // Reset AI logs when switching profiles
+  useEffect(() => {
+    setRawAiLogs('');
+  }, [activeProfileId]);
+
   // AI Logs Polling (Based on Active Profile)
   useEffect(() => {
     if (!activeProfileId || logViewMode !== 'live') {

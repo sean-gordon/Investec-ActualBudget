@@ -1,3 +1,14 @@
+# Release v6.4.5 - Fast Log Switching
+
+## 🚀 Key Highlights
+This release refines the "Live Logs" experience by ensuring the log console instantly clears and refreshes when you switch between profiles. This prevents the confusion of briefly seeing the previous profile's logs while the new ones are loading.
+
+### 🛠 Improvements
+*   **Instant Log Reset**: When selecting a new profile, the AI Log buffer is immediately cleared, providing a responsive and clean transition.
+*   **Correct History Loading**: The log viewer correctly re-fetches the latest history (last 100 lines) from the selected profile's container, ensuring you always see the relevant context.
+
+---
+
 # Release v6.4.4 - Smart Log Filtering
 
 ## 🚀 Key Highlights
