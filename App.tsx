@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Activity, Settings, Play, CreditCard, ExternalLink, Wifi, Download, Github, Trash2, Power, PauseCircle, MousePointerClick } from 'lucide-react';
+import { Activity, Settings, Play, CreditCard, ExternalLink, Wifi, Download, Github, Trash2, Power, PauseCircle, MousePointerClick, FileText } from 'lucide-react';
 import { AppConfig, LogEntry } from './types';
 import { SettingsForm } from './components/SettingsForm';
 import { LogConsole } from './components/LogConsole';
@@ -17,6 +17,10 @@ export default function App() {
   const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
   const [systemLogs, setSystemLogs] = useState<LogEntry[]>([]);
   const [rawAiLogs, setRawAiLogs] = useState<string>('');
+  
+  // Update Log View State
+  const [logViewMode, setLogViewMode] = useState<'live' | 'file'>('live');
+  const [updateLogData, setUpdateLogData] = useState<LogEntry[]>([]);
   
   const [isConnected, setIsConnected] = useState(false);
   const [processingProfiles, setProcessingProfiles] = useState<string[]>([]);
@@ -39,6 +43,48 @@ export default function App() {
     } catch (error) {
       throw error;
     }
+  };
+
+  const fetchUpdateLog = async () => {
+      try {
+          const res = await fetch(`${API_BASE}/debug/update-log`);
+          if (!res.ok) throw new Error("Failed to fetch logs");
+          const text = await res.text();
+          
+          const parsed: LogEntry[] = [];
+          const lines = text.split('\n');
+          // Regex to match: [2024-12-12T10:00:00.000Z] Message
+          const regex = /^\[(.*?)\] (.*)$/;
+          
+          lines.forEach(line => {
+              const match = line.match(regex);
+              if (match) {
+                  const ts = Date.parse(match[1]);
+                  const msg = match[2];
+                  parsed.push({
+                      timestamp: isNaN(ts) ? Date.now() : ts,
+                      message: msg,
+                      type: msg.toLowerCase().includes('error') ? 'error' : 'info',
+                      source: 'System'
+                  });
+              } else if (line.trim()) {
+                  // Fallback for lines that don't match standard format (e.g. stack traces)
+                  parsed.push({
+                      timestamp: Date.now(), // or previous timestamp
+                      message: line,
+                      type: 'info',
+                      source: 'System'
+                  });
+              }
+          });
+          setUpdateLogData(parsed.reverse()); // Show newest first usually, but LogConsole handles scroll. 
+          // Actually let's keep chronological for the console component
+          setUpdateLogData(parsed);
+          
+      } catch (e) {
+          console.error("Fetch update log failed", e);
+          alert("Could not fetch update log.");
+      }
   };
 
   // Initial Load & Version Check
@@ -72,10 +118,12 @@ export default function App() {
         setProcessingProfiles(statusData.processingProfiles || []);
         setServerVersion(statusData.version);
 
-        const logsData = await fetchJson(`${API_BASE}/logs`);
-        // Tag system logs
-        const taggedLogs = logsData.map((l: LogEntry) => ({ ...l, source: 'System' }));
-        setSystemLogs(taggedLogs);
+        if (logViewMode === 'live') {
+            const logsData = await fetchJson(`${API_BASE}/logs`);
+            // Tag system logs
+            const taggedLogs = logsData.map((l: LogEntry) => ({ ...l, source: 'System' }));
+            setSystemLogs(taggedLogs);
+        }
 
       } catch (e) {
         setIsConnected(false);
@@ -84,12 +132,12 @@ export default function App() {
     poll();
     const interval = setInterval(poll, 2000);
     return () => clearInterval(interval);
-  }, []);
+  }, [logViewMode]);
 
   // AI Logs Polling (Based on Active Profile)
   useEffect(() => {
-    if (!activeProfileId) {
-        setRawAiLogs('');
+    if (!activeProfileId || logViewMode !== 'live') {
+        if (logViewMode !== 'live') setRawAiLogs(''); // Clear if not looking at live
         return;
     }
 
@@ -111,10 +159,12 @@ export default function App() {
     pollAi();
     const interval = setInterval(pollAi, 5000);
     return () => clearInterval(interval);
-  }, [activeProfileId, config.profiles]);
+  }, [activeProfileId, config.profiles, logViewMode]);
 
   // Compute Merged Logs
   const mergedLogs = useMemo(() => {
+    if (logViewMode === 'file') return updateLogData;
+
     const parsedAiLogs: LogEntry[] = [];
     
     if (rawAiLogs) {
@@ -146,7 +196,7 @@ export default function App() {
 
     // Combine and Sort
     return [...systemLogs, ...parsedAiLogs].sort((a, b) => a.timestamp - b.timestamp);
-  }, [systemLogs, rawAiLogs]);
+  }, [systemLogs, rawAiLogs, logViewMode, updateLogData]);
 
 
   const handleSaveSettings = async (newConfig: AppConfig) => {
@@ -304,7 +354,8 @@ export default function App() {
                                             <tr 
                                                 key={profile.id} 
                                                 onClick={() => setActiveProfileId(profile.id)}
-                                                className={`cursor-pointer transition-colors border-l-4 ${isActive 
+                                                className={`cursor-pointer transition-colors border-l-4 ${
+                                                    isActive 
                                                     ? 'bg-slate-800/60 border-investec-500' 
                                                     : 'hover:bg-slate-800/30 border-transparent'
                                                 } ${!isEnabled ? 'opacity-50 grayscale' : ''}`}
@@ -383,9 +434,36 @@ export default function App() {
               {/* Right Col: Logs */}
               <div className="xl:col-span-1 flex flex-col h-full overflow-hidden">
                 <div className="bg-slate-900 rounded-xl border border-slate-800 shadow-lg flex flex-col h-full overflow-hidden">
-                    <div className="px-5 py-4 border-b border-slate-800 bg-slate-900/50 flex-none">
-                         <h2 className="text-lg font-semibold text-white">Live Logs: <span className="text-investec-500">{activeProfileName}</span></h2>
-                         <p className="text-[10px] text-slate-500 mt-1">Showing System Events & Actual AI Output</p>
+                    <div className="px-5 py-4 border-b border-slate-800 bg-slate-900/50 flex-none flex justify-between items-center">
+                        <div>
+                            <h2 className="text-lg font-semibold text-white">
+                                {logViewMode === 'live' ? 'Live Logs:' : 'System Logs:'} <span className="text-investec-500">
+                                    {logViewMode === 'live' ? activeProfileName : 'Update History'}
+                                </span>
+                            </h2>
+                            <p className="text-[10px] text-slate-500 mt-1">
+                                {logViewMode === 'live' ? 'Showing System Events & Actual AI Output' : 'Showing persistent update logs from disk'}
+                            </p>
+                        </div>
+                        
+                        <button
+                            onClick={() => {
+                                if (logViewMode === 'live') {
+                                    setLogViewMode('file');
+                                    fetchUpdateLog();
+                                } else {
+                                    setLogViewMode('live');
+                                }
+                            }}
+                            className={`p-2 rounded-lg transition-colors border ${
+                                logViewMode === 'file' 
+                                ? 'bg-investec-500/10 text-investec-500 border-investec-500/50' 
+                                : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'
+                            }`}
+                            title={logViewMode === 'live' ? "View Update History" : "View Live Stream"}
+                        >
+                            {logViewMode === 'live' ? <FileText size={16} /> : <Activity size={16} />}
+                        </button>
                     </div>
                     <div className="flex-1 overflow-hidden p-0 relative">
                          <div className="absolute inset-0">

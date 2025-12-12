@@ -1,3 +1,15 @@
+# Release v6.4.3 - Update History Viewer
+
+## 🚀 Key Highlights
+This release adds direct access to the system update logs from the dashboard. You can now easily verify if an update succeeded or diagnose why it failed without needing to use API endpoints manually.
+
+### ✨ New Features
+*   **Update History Button**: Added a toggle button in the "Live Logs" panel header (📄 icon).
+*   **Persistent Log Viewer**: Clicking the toggle switches the log view to display the contents of the `update.log` file stored on the server.
+    *   This log persists across restarts and updates, providing a historical record of all update attempts.
+
+---
+
 # Release v6.4.2 - Integrated Log Viewer
 
 ## 🚀 Key Highlights
