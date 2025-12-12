@@ -1,3 +1,13 @@
+# Release v6.4.8 - Longest Match Filtering
+
+## 🚀 Key Highlights
+This release fixes a log filtering bug where profiles with overlapping names (e.g., "Sean" and "Sean Investec") would incorrectly see each other's logs.
+
+### 🛠 Fixes
+*   **Exact Name Matching**: The log viewer now prioritizes the longest profile name found in a log message. This ensures that a log mentioning "Sean Investec" is correctly attributed to "Sean Investec" and not "Sean", keeping your logs clean and accurate.
+
+---
+
 # Release v6.4.7 - Instant Log Clearing
 
 ## 🚀 Key Highlights

@@ -173,24 +173,34 @@ export default function App() {
     // 1. Filter System Logs based on Active Profile
     const activeProfile = config.profiles.find(p => p.id === activeProfileId);
     const filteredSystemLogs = systemLogs.filter(log => {
-        if (!activeProfile) return true; // Show all if no profile selected
+        if (!activeProfile) return true;
         
-        // Check for [Profile Name] prefix (Worker logs)
+        // 1. Bracket Check (Worker Logs: [Profile Name] ...)
         const match = log.message.match(/^\[(.*?)\]/);
         if (match) {
             return match[1].trim() === activeProfile.name.trim();
         }
 
-        // Handle generic logs (Scheduler, etc.)
-        // If the log mentions another profile's name explicitly, hide it.
-        // If it mentions the current profile (e.g. "Schedule set for 'Active'"), keep it.
-        // If it mentions no profiles (e.g. "System Online"), keep it.
-        const otherProfiles = config.profiles.filter(p => p.id !== activeProfileId);
-        const mentionsOther = otherProfiles.some(p => log.message.includes(p.name));
-        const mentionsCurrent = log.message.includes(activeProfile.name);
+        // 2. Generic Logs (Scheduler/System: "Schedule set for 'Profile Name'")
+        // Strategy: Find the longest profile name mentioned in the log.
+        // If the longest match is the Active Profile -> Show.
+        // If the longest match is Another Profile -> Hide.
+        // If no profile names are found -> Show (Generic System Log).
+        
+        const allProfiles = config.profiles;
+        // Sort by length desc to match "Sean Investec" before "Sean"
+        const sortedNames = [...allProfiles]
+            .map(p => p.name)
+            .sort((a, b) => b.length - a.length);
 
-        if (mentionsOther && !mentionsCurrent) return false;
+        const matchedName = sortedNames.find(name => log.message.includes(name));
 
+        if (matchedName) {
+            // A profile was mentioned. Only show if it matches the active profile.
+            return matchedName === activeProfile.name;
+        }
+
+        // No profiles mentioned (e.g. "System Online") -> Keep it
         return true;
     });
 
