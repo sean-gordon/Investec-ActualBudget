@@ -1,3 +1,17 @@
+# Release v6.4.9 - Robust Auto-Update
+
+## 🚀 Key Highlights
+This release hardens the auto-update mechanism to ensure that new code is always picked up correctly, solving the "it didn't update" issue.
+
+### 🛠 Fixes
+*   **Atomic Rebuild & Restart**: The update process now uses a single, powerful command (`docker compose up -d --build --force-recreate --remove-orphans`). This ensures that:
+    1.  The image is rebuilt from the latest code.
+    2.  The running container is forcibly replaced with the new image.
+    3.  Any orphaned containers are cleaned up.
+*   **Auto-Cleanup**: Added a step to prune old Docker images after an update to keep your disk clean.
+
+---
+
 # Release v6.4.8 - Longest Match Filtering
 
 ## 🚀 Key Highlights

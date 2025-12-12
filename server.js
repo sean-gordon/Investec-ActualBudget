@@ -46,7 +46,7 @@ const CONFIG_FILE = path.join(DATA_DIR, 'settings.json');
 const CATEGORIES_FILE = path.join(DATA_DIR, 'categories.json');
 const ACTUAL_DATA_DIR = path.join(DATA_DIR, 'actual-data');
 const UPDATE_LOG = path.join(DATA_DIR, 'update.log');
-const SCRIPT_VERSION = "6.4.8 - Longest Match Filtering";
+const SCRIPT_VERSION = "6.4.9 - Robust Auto-Update";
 
 // Disable Self-Signed Cert Rejection
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
@@ -894,12 +894,20 @@ app.post('/api/update', (req, res) => {
             // 2. Git Pull
             await runCmd(`${hostDirPrefix} git fetch --all && git pull`, 'Git Pull');
 
-            // 3. Build Container
-            // We must use the hostDirPrefix so the docker command receives the env var
-            await runCmd(`${hostDirPrefix} docker compose build --no-cache`, 'Docker Build');
+            // 3. Update Container (Build + Up + Force Recreate + Remove Orphans)
+            // This single command is safer and more robust than splitting them.
+            // It ensures the running container is replaced by the newly built image.
+            await runCmd(
+                `${hostDirPrefix} docker compose up -d --build --force-recreate --remove-orphans`, 
+                'Docker Build & Up'
+            );
 
-            // 4. Restart Container
-            await runCmd(`${hostDirPrefix} docker compose up -d --force-recreate`, 'Docker Restart');
+            // 4. Prune old images to save space
+            try {
+                 await runCmd('docker image prune -f', 'Cleanup Old Images');
+            } catch (e) {
+                logToFile(`Cleanup Warning: ${e.message}`);
+            }
 
             logToFile('=== Update Process Completed Successfully ===');
             
