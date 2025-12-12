@@ -32,7 +32,7 @@ export const LogConsole: React.FC<LogConsoleProps> = ({ logs }) => {
         <span className="text-xs font-mono text-slate-400">System Output</span>
       </div>
       
-      <div className="flex-1 overflow-y-auto p-4 space-y-2 font-mono text-sm">
+      <div className="h-full overflow-y-auto p-4 space-y-2 font-mono text-xs bg-slate-950">
         {logs.length === 0 && (
           <div className="text-slate-600 italic text-center py-10">No logs available.</div>
         )}
