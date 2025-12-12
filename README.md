@@ -23,7 +23,13 @@ Code security is actively monitored by **Snyk** to ensure dependencies and conta
 ## Features
 
 *   **Multi-Profile Support**: Manage multiple sync profiles (e.g., "Sean's Account", "Shelley's Account") from a single dashboard.
+*   **Clean Table View**: Profiles are displayed in a responsive table, showing status, target, and schedule at a glance.
+*   **Profile Controls**:
+    *   **Enable/Disable**: Toggle profiles on or off directly from the dashboard or settings.
+    *   **Test Credentials**: Verify your Investec and Actual Budget connections before saving.
+    *   **Delete**: Remove unused profiles with a safe confirmation step.
 *   **Flexible Targets**: Each profile can sync to a different Actual Budget server (different ports/URLs) or different budget files.
+*   **Concurrent Syncing**: The system can now run sync jobs for different profiles in parallel without conflict.
 *   **Secure Architecture**: Uses process isolation for every sync to prevent database locks.
 *   **Automatic Account Creation**: Automatically creates accounts in Actual Budget based on your Investec products (e.g., "Private Bank Account 1234").
 *   **Category Synchronisation**: Define your master category list in the Settings UI. The system ensures these groups and categories exist in your budget.
@@ -100,9 +106,11 @@ docker compose up -d --build
 2.  Click the **Settings** (Gear icon) in the top right.
 
 ### 1. Sync Profiles
-The new "Profiles" system allows you to manage multiple sync configurations independently.
+The "Profiles" system allows you to manage multiple sync configurations independently.
 *   **Create Profile**: Click the `+` button to add a new profile.
 *   **Name**: Give your profile a descriptive name (e.g., "Sean's Investec").
+*   **Enable/Disable**: Use the toggle to temporarily pause syncing for a profile without deleting it.
+*   **Test Connections**: Use the "Test Connection" buttons to verify your credentials for both Investec and Actual Budget.
 *   **Credentials**: Enter the unique Investec Client ID, Secret, and API Key for this profile.
 *   **Actual Budget Target**: 
     *   **Server URL**: Specify the exact URL and port for the target Actual Budget instance (e.g., `http://192.168.1.50:5006` for Sean, `http://192.168.1.50:5007` for Shelley).

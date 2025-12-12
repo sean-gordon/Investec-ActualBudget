@@ -1,3 +1,21 @@
+# Release v6.3.1 - Enhanced Profile Management
+
+## 🚀 Key Highlights
+This release refines the Multi-Profile system with a cleaner table interface, status indicators, and more granular control over your sync configurations.
+
+### ✨ New Features
+*   **Table View**: The main dashboard now displays profiles in a clean, responsive table, showing you the status, target server, and schedule for each profile at a glance.
+*   **Enable/Disable Profiles**: You can now toggle profiles on or off directly from the dashboard or the settings page. Disabled profiles will not run scheduled or manual syncs.
+*   **Delete Profiles**: Added the ability to delete profiles (with confirmation) directly from the dashboard table.
+*   **Connection Testing**: Re-introduced the "Test Connection" buttons in the profile editor. You can now verify your Investec credentials and Actual Budget connection individually before saving.
+*   **Status Indicators**: The table provides clear visual feedback on whether a profile is "Ready", "Syncing", or "Disabled".
+
+### 🛡 Security & Maintenance
+*   **Vulnerability Fixes**: Updated dependencies to resolve known vulnerabilities in `esbuild` / `vite`.
+*   **Port Configuration**: The application port can now be easily changed in `docker-compose.yml` via the `PORT` environment variable.
+
+---
+
 # Release v6.3.0 - Multi-Profile Support
 
 ## 🚀 Key Highlights
