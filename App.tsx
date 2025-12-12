@@ -108,12 +108,15 @@ export default function App() {
   };
 
   const toggleProfile = async (profileId: string, enabled: boolean) => {
+    // 1. Create updated profiles array
     const updatedProfiles = config.profiles.map(p => 
         p.id === profileId ? { ...p, enabled } : p
     );
+    
+    // 2. Create full new config object
     const newConfig = { ...config, profiles: updatedProfiles };
     
-    // Optimistic UI
+    // 3. Optimistic UI Update
     setConfig(newConfig);
     
     try {
@@ -149,9 +152,9 @@ export default function App() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-slate-950 text-slate-200">
+    <div className="flex flex-col h-screen overflow-hidden bg-slate-950 text-slate-200">
       {/* Header */}
-      <header className="flex items-center justify-between px-8 py-6 border-b border-slate-800 bg-slate-950/50 backdrop-blur-sm sticky top-0 z-10">
+      <header className="flex-none flex items-center justify-between px-8 py-6 border-b border-slate-800 bg-slate-950/50 backdrop-blur-sm z-10">
         <div className="flex items-center gap-3">
           <div className="bg-investec-900 p-2 rounded-lg border border-slate-700">
             <Activity className="text-investec-500" size={24} />
@@ -206,18 +209,18 @@ export default function App() {
 
       {/* Content */}
       <main className="flex-1 overflow-y-auto p-8">
-        <div className="max-w-7xl mx-auto">
+        <div className="max-w-7xl mx-auto h-full">
           
           {view === 'settings' ? (
             <SettingsForm config={config} onSave={handleSaveSettings} />
           ) : (
-            <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-8 h-full">
               
               {/* Left Col: Profiles Table */}
-              <div className="xl:col-span-2 space-y-6">
+              <div className="xl:col-span-2 flex flex-col gap-6">
                 
                 {/* Profiles Table */}
-                <div className="bg-slate-900 rounded-xl border border-slate-800 shadow-lg overflow-hidden">
+                <div className="bg-slate-900 rounded-xl border border-slate-800 shadow-lg overflow-hidden flex-none">
                     <div className="px-6 py-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/50">
                         <h2 className="text-lg font-semibold text-white flex items-center gap-2">
                             <CreditCard size={18} className="text-investec-500" />
@@ -328,7 +331,7 @@ export default function App() {
                 </div>
 
                 {/* System Status Cards */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 flex-none">
                     <div className="bg-slate-900 p-5 rounded-xl border border-slate-800 flex items-center gap-4">
                         <div className={`p-3 rounded-full ${isConnected ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}`}>
                             <Wifi size={20} />
@@ -348,28 +351,20 @@ export default function App() {
                             <p className="text-sm font-medium text-white">{processingProfiles.length} Sync Jobs Running</p>
                         </div>
                     </div>
-
-                    <div className="bg-slate-900 p-5 rounded-xl border border-slate-800 flex items-center gap-4">
-                        <div className="p-3 rounded-full bg-slate-700/30 text-slate-400">
-                            <Clock size={20} />
-                        </div>
-                        <div>
-                            <p className="text-xs text-slate-500 uppercase font-bold tracking-wider">Server Time</p>
-                            <p className="text-sm font-medium text-white">{new Date().toLocaleTimeString()}</p>
-                        </div>
-                    </div>
                 </div>
 
               </div>
 
               {/* Right Col: Logs */}
-              <div className="xl:col-span-1 flex flex-col h-[calc(100vh-8rem)]">
+              <div className="xl:col-span-1 flex flex-col h-full min-h-[400px]">
                 <div className="bg-slate-900 rounded-xl border border-slate-800 shadow-lg flex flex-col h-full overflow-hidden">
-                    <div className="px-5 py-4 border-b border-slate-800 bg-slate-900/50">
+                    <div className="px-5 py-4 border-b border-slate-800 bg-slate-900/50 flex-none">
                          <h2 className="text-lg font-semibold text-white">Live Logs</h2>
                     </div>
-                    <div className="flex-1 overflow-hidden p-0">
-                         <LogConsole logs={logs} />
+                    <div className="flex-1 overflow-hidden p-0 relative">
+                         <div className="absolute inset-0">
+                            <LogConsole logs={logs} />
+                         </div>
                     </div>
                 </div>
               </div>
@@ -379,7 +374,7 @@ export default function App() {
         </div>
       </main>
       
-      <footer className="p-4 text-center text-xs text-slate-600 bg-slate-950/80 backdrop-blur-sm border-t border-slate-900">
+      <footer className="flex-none p-4 text-center text-xs text-slate-600 bg-slate-950/80 backdrop-blur-sm border-t border-slate-900">
         <a href="https://actualbudget.com" target="_blank" rel="noreferrer" className="hover:text-slate-400 inline-flex items-center gap-1">
           Powered by Actual Budget <ExternalLink size={10} />
         </a>
