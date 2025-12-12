@@ -9,3 +9,4 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - NODE_ENV=production
+      - PORT=${APP_PORT:-46490}
