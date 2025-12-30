@@ -1,5 +1,6 @@
 services:
   investec-sync:
+    restart: always
     build: .
     network_mode: "host"
     volumes:
