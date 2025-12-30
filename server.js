@@ -45,10 +45,21 @@ const DATA_DIR = path.join(__dirname, 'data');
 const CONFIG_FILE = path.join(DATA_DIR, 'settings.json');
 const CATEGORIES_FILE = path.join(DATA_DIR, 'categories.json');
 const ACTUAL_DATA_DIR = path.join(DATA_DIR, 'actual-data');
-const SCRIPT_VERSION = "6.3.2 - Scrolling & Update Fixes";
+const UPDATE_LOG = path.join(DATA_DIR, 'update.log');
+const SCRIPT_VERSION = "6.5.0 - Stable";
 
 // Disable Self-Signed Cert Rejection
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+
+const logToFile = (msg) => {
+    const timestamp = new Date().toISOString();
+    const line = `[${timestamp}] ${msg}\n`;
+    try {
+        fs.appendFileSync(UPDATE_LOG, line);
+    } catch (e) {
+        console.error("Failed to write to update log:", e);
+    }
+};
 
 // --- DEFAULT CATEGORIES ---
 const DEFAULT_CATEGORIES = {
@@ -804,36 +815,107 @@ app.post('/api/git/switch', (req, res) => {
     }, 1000);
 });
 
-app.post('/api/update', (req, res) => {
-    addLog('System update initiated...', 'info');
-    res.json({ status: 'updating', message: 'Update started. Service will restart shortly.' });
-    
-    const config = loadConfig();
-    let hostDir = '';
-    
-    if (config.hostProjectRoot) {
-        // Simple sanitization: allow alphanumeric, slashes, dashes, underscores, dots, and spaces
-        // If it contains anything else (like semicolons or ampersands), ignore it to prevent injection
-        if (/^[a-zA-Z0-9_\-\.\/ ]+$/.test(config.hostProjectRoot)) {
-            hostDir = `HOST_DIR="${config.hostProjectRoot}"`;
-        } else {
-            addLog(`Security Warning: Invalid characters in Host Project Path. Ignoring.`, 'error');
+// --- DOCKER UTILS ---
+app.get('/api/docker/containers', (req, res) => {
+    exec('docker ps --format "{{.Names}}"', (err, stdout) => {
+        if (err) {
+            console.error('Docker ps error:', err);
+            return res.json([]);
         }
+        const containers = stdout.split('\n').map(s => s.trim()).filter(s => s.length > 0);
+        res.json(containers);
+    });
+});
+
+app.get('/api/docker/logs', (req, res) => {
+    const { container } = req.query;
+    if (!container || !/^[a-zA-Z0-9_\-\.]+$/.test(container)) {
+        return res.status(400).json({ error: 'Invalid container name' });
     }
 
-    // Run update in background
-    setTimeout(() => {
-        // Use --force-recreate to ensure the container is actually replaced
-        const cmd = `${hostDir} git fetch --all && ${hostDir} git pull && ${hostDir} docker compose up -d --build --force-recreate`;
+    exec(`docker logs --timestamps --tail 100 ${container}`, (err, stdout, stderr) => {
+        // Docker logs often go to stderr even if not errors (e.g. app logs)
+        // We combine them or just return what we have
+        const combined = (stdout || '') + (stderr || '');
+        res.json({ logs: combined });
+    });
+});
+
+app.get('/api/debug/update-log', (req, res) => {
+    if (fs.existsSync(UPDATE_LOG)) {
+        res.sendFile(UPDATE_LOG);
+    } else {
+        res.send("No update log found.");
+    }
+});
+
+app.post('/api/update', (req, res) => {
+    addLog('System update initiated...', 'info');
+    logToFile('=== Update Process Started ===');
+    res.json({ status: 'updating', message: 'Update started. Check /api/debug/update-log for details. Service will restart shortly.' });
+    
+    const config = loadConfig();
+    let hostDirPrefix = '';
+    
+    if (config.hostProjectRoot) {
+        if (/^[a-zA-Z0-9_\-\.\/ ]+$/.test(config.hostProjectRoot)) {
+            hostDirPrefix = `HOST_DIR="${config.hostProjectRoot}"`;
+        } else {
+            const msg = `Security Warning: Invalid characters in Host Project Path. Ignoring.`;
+            addLog(msg, 'error');
+            logToFile(msg);
+        }
+    } else {
+        logToFile("WARNING: 'Host Project Path' is not set. Docker bind mounts might fail if not running in development.");
+    }
+
+    const runCmd = (cmd, desc) => new Promise((resolve, reject) => {
+        logToFile(`Running: ${desc} (${cmd})`);
         exec(cmd, { cwd: __dirname }, (error, stdout, stderr) => {
+            if (stdout) logToFile(`[STDOUT] ${stdout.trim()}`);
+            if (stderr) logToFile(`[STDERR] ${stderr.trim()}`);
+            
             if (error) {
-                console.error(`Update error: ${error}`);
-                addLog(`Update failed: ${error.message}`, 'error');
-                return;
+                logToFile(`FAILED: ${error.message}`);
+                reject(error);
+            } else {
+                logToFile(`SUCCESS: ${desc}`);
+                resolve(stdout);
             }
-            console.log(`Update output: ${stdout}`);
-            if (stderr) console.error(`Update stderr: ${stderr}`);
         });
+    });
+
+    // Run update in background
+    setTimeout(async () => {
+        try {
+            // 1. Check Docker Compose availability
+            await runCmd('docker compose version', 'Check Docker Compose');
+
+            // 2. Git Pull
+            await runCmd(`${hostDirPrefix} git fetch --all && git pull`, 'Git Pull');
+
+            // 3. Update Container (Build + Up + Force Recreate + Remove Orphans)
+            // This single command is safer and more robust than splitting them.
+            // It ensures the running container is replaced by the newly built image.
+            await runCmd(
+                `${hostDirPrefix} docker compose up -d --build --force-recreate --remove-orphans`, 
+                'Docker Build & Up'
+            );
+
+            // 4. Prune old images to save space
+            try {
+                 await runCmd('docker image prune -f', 'Cleanup Old Images');
+            } catch (e) {
+                logToFile(`Cleanup Warning: ${e.message}`);
+            }
+
+            logToFile('=== Update Process Completed Successfully ===');
+            
+        } catch (e) {
+            console.error(`Update Error: ${e.message}`);
+            logToFile(`CRITICAL ERROR: Update aborted. ${e.message}`);
+            addLog(`Update failed: ${e.message}`, 'error');
+        }
     }, 1000);
 });
 

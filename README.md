@@ -35,7 +35,14 @@ Code security is actively monitored by **Snyk** to ensure dependencies and conta
 *   **Category Synchronisation**: Define your master category list in the Settings UI. The system ensures these groups and categories exist in your budget.
 *   **Smart Deduplication**: Prevents duplicate transactions even if run multiple times a day.
 *   **Transactions Only**: This tool merges transactions into your existing budget; it does not overwrite existing transaction data.
-*   **Auto-Update System**: Easily update to the latest version directly from the dashboard with a single click.
+*   **Robust Auto-Update System**: Easily update to the latest version directly from the dashboard with a single click. The system will automatically pull new code, rebuild the container, and replace the old one, ensuring seamless upgrades.
+*   **Integrated & Contextual Log Viewer**:
+    *   **Unified Log Console**: Merges System logs (Investec Sync events) and Actual AI logs (from your AI container) into a single, chronologically sorted stream.
+    *   **Profile-Driven Display**: Clicking any profile row in the dashboard dynamically loads logs relevant to that specific profile.
+    *   **Smart Log Filtering**: System logs are intelligently filtered to show only generic system events and events strictly pertaining to the selected profile, preventing cross-profile log contamination, especially with overlapping profile names.
+    *   **Actual AI Log Viewer**: Directly monitor live logs from your associated Actual AI Docker container, with running containers auto-detected for easy selection in settings.
+    *   **Update History Button**: A dedicated button in the log panel header (`📄` icon) to view persistent historical update logs.
+
 
 ---
 
