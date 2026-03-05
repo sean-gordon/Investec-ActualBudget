@@ -1,327 +1,387 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { Save, Eye, EyeOff, RotateCcw, GitBranch } from 'lucide-react';
 import { AppConfig, CategoryTree } from '../types';
-import { Save, Eye, EyeOff, Clock, CheckCircle, AlertCircle, Loader2, ListTree } from 'lucide-react';
 
-interface Props {
+interface SettingsFormProps {
   config: AppConfig;
-  onSave: (config: AppConfig) => void;
+  onSave: (cfg: AppConfig) => void;
 }
 
-export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
-  const [localConfig, setLocalConfig] = useState<AppConfig>(config);
-  const [showSecrets, setShowSecrets] = useState(false);
+export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) => {
+  const [formData, setFormData] = useState<AppConfig>(config);
+  const [showPass, setShowPass] = useState(false);
+  const [categories, setCategories] = useState<CategoryTree>({});
+  const [jsonError, setJsonError] = useState<string | null>(null);
+  const [jsonText, setJsonText] = useState('');
+  const [isEditingCats, setIsEditingCats] = useState(false);
   
-  // Test States
-  const [testingInvestec, setTestingInvestec] = useState(false);
-  const [investecResult, setInvestecResult] = useState<{success: boolean, msg: string} | null>(null);
-  
-  const [testingActual, setTestingActual] = useState(false);
-  const [actualResult, setActualResult] = useState<{success: boolean, msg: string} | null>(null);
-
-  // Category State
-  const [categoryJson, setCategoryJson] = useState<string>('');
-  const [categoryError, setCategoryError] = useState<string | null>(null);
-  const [showCategories, setShowCategories] = useState(false);
+  // Git State
+  const [branches, setBranches] = useState<string[]>([]);
+  const [currentBranch, setCurrentBranch] = useState<string>('unknown');
+  const [selectedBranch, setSelectedBranch] = useState<string>('');
+  const [isSwitching, setIsSwitching] = useState(false);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
 
   useEffect(() => {
-    setLocalConfig(config);
-    // Fetch categories on mount
-    fetch('/api/categories')
-        .then(res => res.json())
-        .then(data => setCategoryJson(JSON.stringify(data, null, 2)))
-        .catch(console.error);
+    setFormData(config);
   }, [config]);
+
+  useEffect(() => {
+    // Fetch categories
+    fetch('/api/categories')
+      .then(res => res.json())
+      .then(data => {
+        setCategories(data);
+        setJsonText(JSON.stringify(data, null, 2));
+      })
+      .catch(console.error);
+      
+    // Fetch Git Info
+    fetch('/api/git/branches')
+        .then(res => res.json())
+        .then(data => {
+            if (Array.isArray(data)) setBranches(data);
+        })
+        .catch(console.error);
+
+    const checkGitStatus = () => {
+        fetch('/api/git/status')
+            .then(res => res.json())
+            .then(data => {
+                setCurrentBranch(data.branch);
+                // Only set selected if it hasn't been touched yet (or matches previous current)
+                setSelectedBranch(prev => prev === '' || prev === data.branch ? data.branch : prev);
+                setUpdateAvailable(data.updateAvailable);
+            })
+            .catch(console.error);
+    };
+
+    checkGitStatus();
+    // Poll every 5 minutes
+    const interval = setInterval(checkGitStatus, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    setLocalConfig(prev => ({ ...prev, [name]: value }));
-    // Clear test results when typing
-    if (name.startsWith('investec')) setInvestecResult(null);
-    if (name.startsWith('actual')) setActualResult(null);
+    setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    setLocalConfig(prev => ({ ...prev, [name]: value.trim() }));
+  const handleSaveCategories = async () => {
+    try {
+      const parsed = JSON.parse(jsonText);
+      await fetch('/api/categories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(parsed)
+      });
+      setCategories(parsed);
+      setIsEditingCats(false);
+      setJsonError(null);
+      alert('Categories saved!');
+    } catch (e: any) {
+      setJsonError(e.message);
+    }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleBranchSwitch = async () => {
+    if (!selectedBranch) return;
     
-    // Validate Categories
-    try {
-        const parsedCats = JSON.parse(categoryJson);
-        setCategoryError(null);
-        // Save Categories
-        await fetch('/api/categories', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(parsedCats)
-        });
-    } catch (err) {
-        setCategoryError("Invalid JSON format in Categories");
-        return; // Stop save if invalid
+    let msg = `Are you sure you want to switch to branch "${selectedBranch}"?\n\nThe server will rebuild and restart.`;
+    if (selectedBranch === currentBranch && updateAvailable) {
+        msg = `Ready to upgrade branch "${selectedBranch}" to the latest version?\n\nThe server will pull changes and rebuild.`;
     }
-
-    onSave(localConfig);
-  };
-
-  const testInvestec = async () => {
-    setTestingInvestec(true);
-    setInvestecResult(null);
+    
+    if (!confirm(msg)) return;
+    
+    setIsSwitching(true);
     try {
-        const res = await fetch('/api/test/investec', {
+        await fetch('/api/git/switch', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                investecClientId: localConfig.investecClientId,
-                investecSecretId: localConfig.investecSecretId,
-                investecApiKey: localConfig.investecApiKey
-            })
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ branch: selectedBranch })
         });
-        const data = await res.json();
-        setInvestecResult({ success: data.success, msg: data.message });
+        alert('Process started. Page will reload in 15 seconds.');
+        setTimeout(() => window.location.reload(), 15000);
     } catch (e) {
-        setInvestecResult({ success: false, msg: "Network Error" });
-    } finally {
-        setTestingInvestec(false);
-    }
-  };
-
-  const testActual = async () => {
-    setTestingActual(true);
-    setActualResult(null);
-    try {
-        const res = await fetch('/api/test/actual', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                actualServerUrl: localConfig.actualServerUrl,
-                actualBudgetId: localConfig.actualBudgetId,
-                actualPassword: localConfig.actualPassword
-            })
-        });
-        const data = await res.json();
-        setActualResult({ success: data.success, msg: data.message });
-    } catch (e) {
-        setActualResult({ success: false, msg: "Network Error" });
-    } finally {
-        setTestingActual(false);
+        setIsSwitching(false);
+        alert('Failed to trigger git operation.');
     }
   };
 
   return (
-    <form onSubmit={handleSubmit} className="bg-slate-900 p-6 rounded-lg border border-slate-800 shadow-xl max-w-2xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-xl font-semibold text-slate-100">Configuration</h2>
-        <button
-          type="button"
-          onClick={() => setShowSecrets(!showSecrets)}
-          className="text-slate-400 hover:text-white transition-colors"
-        >
-          {showSecrets ? <EyeOff size={20} /> : <Eye size={20} />}
-        </button>
-      </div>
+    <div className="space-y-8 animate-fade-in">
 
-      <div className="space-y-4">
-        {/* INVESTEC SECTION */}
-        <div className="p-3 bg-slate-800/50 rounded-md border border-slate-700/50 mb-4">
-          <div className="flex justify-between items-center mb-2">
-            <h3 className="text-investec-500 font-bold text-sm uppercase tracking-wider">Investec Credentials</h3>
-            <button 
-                type="button" 
-                onClick={testInvestec} 
-                disabled={testingInvestec || !localConfig.investecClientId}
-                className="text-xs bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-white flex items-center gap-1 disabled:opacity-50"
+      {/* Git Branch Management */}
+      <section className="bg-slate-900 p-6 rounded-xl border border-slate-800">
+        <div className="flex justify-between items-center mb-4">
+            <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                <div className="w-1 h-6 bg-orange-500 rounded-full"></div>
+                Git Repository Control
+            </h2>
+            <button
+                onClick={() => {
+                    // Re-use the existing fetch logic
+                    fetch('/api/git/status')
+                        .then(res => res.json())
+                        .then(data => {
+                            setCurrentBranch(data.branch);
+                            setSelectedBranch(prev => prev === '' || prev === data.branch ? data.branch : prev);
+                            setUpdateAvailable(data.updateAvailable);
+                            alert('Check complete.');
+                        })
+                        .catch(console.error);
+                }}
+                className="text-sm bg-slate-800 hover:bg-slate-700 px-3 py-1 rounded text-slate-300 transition-colors flex items-center gap-2"
+                title="Force check for updates"
             >
-                {testingInvestec && <Loader2 size={10} className="animate-spin"/>}
-                Test Investec
+                <RotateCcw size={14} />
+                Check Now
             </button>
-          </div>
-          
-          {investecResult && (
-             <div className={`text-xs p-2 rounded mb-2 flex items-start gap-2 ${investecResult.success ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}`}>
-                {investecResult.success ? <CheckCircle size={14} className="mt-0.5"/> : <AlertCircle size={14} className="mt-0.5"/>}
-                {investecResult.msg}
-             </div>
-          )}
-
-          <div className="grid grid-cols-1 gap-4">
-            <div>
-              <label className="block text-xs text-slate-400 mb-1">Client ID</label>
-              <input
-                name="investecClientId"
-                value={localConfig.investecClientId || ''}
-                onChange={handleChange}
-                onBlur={handleBlur}
-                type="text"
-                className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-investec-500 outline-none text-slate-200"
-                placeholder="Client ID"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-slate-400 mb-1">Secret ID</label>
-              <input
-                name="investecSecretId"
-                value={localConfig.investecSecretId || ''}
-                onChange={handleChange}
-                onBlur={handleBlur}
-                type={showSecrets ? "text" : "password"}
-                className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-investec-500 outline-none text-slate-200"
-                placeholder="Secret"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-slate-400 mb-1">API Key</label>
-              <input
-                name="investecApiKey"
-                value={localConfig.investecApiKey || ''}
-                onChange={handleChange}
-                onBlur={handleBlur}
-                type={showSecrets ? "text" : "password"}
-                className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-investec-500 outline-none text-slate-200"
-                placeholder="API Key"
-              />
-            </div>
-          </div>
         </div>
-
-        {/* ACTUAL SECTION */}
-        <div className="p-3 bg-slate-800/50 rounded-md border border-slate-700/50">
-          <div className="flex justify-between items-center mb-2">
-            <h3 className="text-actual-500 font-bold text-sm uppercase tracking-wider">Actual Budget Settings</h3>
-             <button 
-                type="button" 
-                onClick={testActual} 
-                disabled={testingActual || !localConfig.actualServerUrl}
-                className="text-xs bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-white flex items-center gap-1 disabled:opacity-50"
-            >
-                {testingActual && <Loader2 size={10} className="animate-spin"/>}
-                Test Connection
-            </button>
-          </div>
-
-          {actualResult && (
-             <div className={`text-xs p-2 rounded mb-2 flex items-start gap-2 ${actualResult.success ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}`}>
-                {actualResult.success ? <CheckCircle size={14} className="mt-0.5"/> : <AlertCircle size={14} className="mt-0.5"/>}
-                {actualResult.msg}
-             </div>
-          )}
-
-           {/* ERROR HELP */}
-           {!actualResult?.success && actualResult?.msg.includes("SERVER ERROR") && (
-            <div className="bg-orange-950/40 border border-orange-800 p-3 rounded mb-4 text-xs">
-                <p className="font-bold text-orange-400 mb-1">Troubleshoot Connection</p>
-                <p className="text-slate-300 mb-2">
-                    If the ID is definitely correct, the file might not be on the server yet.
-                </p>
-                <ol className="list-decimal pl-4 space-y-1 text-slate-400">
-                    <li>Go to Actual &gt; File Menu &gt; Close File.</li>
-                    <li>Verify the file says "Remote". If it says "Local", you must upload it.</li>
-                    <li>If "Upload" isn't available: Open &gt; Export (Zip) &gt; Close &gt; Import (Actual).</li>
-                </ol>
-            </div>
-           )}
-
-          <div className="grid grid-cols-1 gap-4">
-             <div>
-              <label className="block text-xs text-slate-400 mb-1">Server URL</label>
-              <input
-                name="actualServerUrl"
-                value={localConfig.actualServerUrl || ''}
-                onChange={handleChange}
-                onBlur={handleBlur}
-                type="text"
-                className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-actual-500 outline-none text-slate-200"
-                placeholder="http://127.0.0.1:5006"
-              />
-            </div>
-             <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">Sync ID</label>
-                  <input
-                    name="actualBudgetId"
-                    value={localConfig.actualBudgetId || ''}
-                    onChange={handleChange}
-                    onBlur={handleBlur}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-end">
+            <div className="space-y-2">
+                <label className="text-sm text-slate-400">Host Project Path (Required for Self-Update)</label>
+                <input
                     type="text"
-                    className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-actual-500 outline-none text-slate-200"
-                    placeholder="uuid (Settings > Advanced)"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1 font-semibold">Server / Encryption Password</label>
-                  <input
-                    name="actualPassword"
-                    value={localConfig.actualPassword || ''}
+                    name="hostProjectRoot"
+                    value={formData.hostProjectRoot || ''}
                     onChange={handleChange}
-                    onBlur={handleBlur}
-                    type="password"
-                    className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-slate-500 outline-none text-slate-200"
-                    placeholder="Password"
-                  />
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-orange-500 outline-none transition-all font-mono text-sm"
+                    placeholder="e.g. /home/user/Investec-ActualBudget"
+                />
+                <p className="text-xs text-slate-500">
+                    The absolute path to this folder on your server.
+                </p>
+            </div>
+            <div className="space-y-2">
+                <label className="text-sm text-slate-400">Target Branch</label>
+                <div className="relative">
+                    <select
+                        value={selectedBranch}
+                        onChange={(e) => setSelectedBranch(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-orange-500 outline-none transition-all appearance-none"
+                        disabled={isSwitching}
+                    >
+                        {branches.map(b => (
+                            <option key={b} value={b}>{b}</option>
+                        ))}
+                    </select>
+                    <GitBranch size={16} className="absolute right-3 top-3 text-slate-500 pointer-events-none" />
                 </div>
-             </div>
-          </div>
-        </div>
-        
-        {/* CATEGORY SECTION */}
-        <div className="p-3 bg-slate-800/50 rounded-md border border-slate-700/50">
-             <div className="flex justify-between items-center mb-2 cursor-pointer" onClick={() => setShowCategories(!showCategories)}>
-                 <h3 className="text-slate-400 font-bold text-sm uppercase tracking-wider flex items-center gap-2">
-                    <ListTree size={14} /> Category Management
-                 </h3>
-                 <span className="text-xs text-slate-500">{showCategories ? 'Hide' : 'Edit'}</span>
-             </div>
-             
-             {showCategories && (
-                 <div className="mt-2">
-                     <p className="text-[10px] text-slate-400 mb-2">
-                         Edit the JSON below to configure categories. These will be created in Actual Budget automatically during the next Sync.
-                         <br/><span className="text-yellow-500">Note:</span> This is additive only. Deleting here will NOT delete from Actual.
-                     </p>
-                     {categoryError && (
-                         <div className="text-xs text-red-400 mb-2">{categoryError}</div>
-                     )}
-                     <textarea
-                        value={categoryJson}
-                        onChange={(e) => setCategoryJson(e.target.value)}
-                        className="w-full h-64 bg-slate-950 border border-slate-700 rounded p-2 text-xs font-mono text-green-400 focus:outline-none focus:border-investec-500"
-                     />
-                 </div>
-             )}
-        </div>
+                <p className="text-xs text-slate-500">
+                    Current Branch: <span className="font-mono text-orange-400">{currentBranch}</span>
+                    {updateAvailable && <span className="ml-2 text-green-400 font-bold">(Update Available)</span>}
+                </p>
+            </div>
+            
+            {/* Stability Warning */}
+            {selectedBranch && selectedBranch !== 'main' && selectedBranch !== currentBranch && (
+                <div className="md:col-span-2 bg-yellow-900/20 border border-yellow-700/50 p-3 rounded-lg flex items-center gap-3">
+                    <div className="text-yellow-500">⚠️</div>
+                    <p className="text-sm text-yellow-200">
+                        <strong>Stability Warning:</strong> You are switching to a development branch (`{selectedBranch}`). 
+                        This may contain experimental features or bugs. Use with caution.
+                    </p>
+                </div>
+            )}
 
-        {/* AUTOMATION */}
-        <div className="p-3 bg-slate-800/50 rounded-md border border-slate-700/50">
-          <h3 className="text-slate-400 font-bold text-sm uppercase tracking-wider mb-2 flex items-center gap-2">
-            <Clock size={14} /> Automation
-          </h3>
-          <div>
-            <label className="block text-xs text-slate-400 mb-1">Cron Schedule (e.g., "0 0 * * *" for daily)</label>
+            <div className="md:col-span-2 flex justify-end">
+                <button
+                    onClick={handleBranchSwitch}
+                    disabled={isSwitching || (selectedBranch === currentBranch && !updateAvailable)}
+                    className={`flex items-center gap-2 px-6 py-2 rounded-lg font-bold transition-all ${
+                        isSwitching || (selectedBranch === currentBranch && !updateAvailable)
+                        ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                        : selectedBranch === currentBranch && updateAvailable
+                            ? 'bg-green-600 hover:bg-green-500 text-white animate-pulse'
+                            : 'bg-orange-600 hover:bg-orange-500 text-white'
+                    }`}
+                >
+                    <GitBranch size={18} />
+                    {isSwitching ? 'Processing...' : 
+                        selectedBranch === currentBranch && updateAvailable ? 'Upgrade Branch' : 
+                        'Switch & Rebuild'
+                    }
+                </button>
+            </div>
+        </div>
+      </section>
+      
+      {/* Investec Section */}
+      <section className="bg-slate-900 p-6 rounded-xl border border-slate-800">
+        <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+          <div className="w-1 h-6 bg-investec-500 rounded-full"></div>
+          Investec Configuration
+        </h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="space-y-2">
+            <label className="text-sm text-slate-400">Client ID</label>
             <input
-              name="syncSchedule"
-              value={localConfig.syncSchedule || ''}
-              onChange={handleChange}
-              onBlur={handleBlur}
               type="text"
-              className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-slate-500 outline-none text-slate-200 font-mono"
-              placeholder="0 0 * * *"
+              name="investecClientId"
+              value={formData.investecClientId}
+              onChange={handleChange}
+              className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-investec-500 outline-none transition-all"
+              placeholder="Iv1. ..."
             />
-            <p className="text-[10px] text-slate-500 mt-1">Standard Cron syntax. Leave empty to disable auto-sync.</p>
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm text-slate-400">Secret ID</label>
+            <div className="relative">
+              <input
+                type={showPass ? "text" : "password"}
+                name="investecSecretId"
+                value={formData.investecSecretId}
+                onChange={handleChange}
+                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-investec-500 outline-none transition-all"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPass(!showPass)}
+                className="absolute right-3 top-2.5 text-slate-500 hover:text-slate-300"
+              >
+                {showPass ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+          </div>
+          <div className="space-y-2 md:col-span-2">
+            <label className="text-sm text-slate-400">API Key</label>
+            <input
+              type="password"
+              name="investecApiKey"
+              value={formData.investecApiKey}
+              onChange={handleChange}
+              className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-investec-500 outline-none transition-all font-mono text-sm"
+              placeholder="Key from Programmable Banking..."
+            />
           </div>
         </div>
-      </div>
+      </section>
 
-      <div className="mt-6 flex justify-end">
+      {/* Actual Section */}
+      <section className="bg-slate-900 p-6 rounded-xl border border-slate-800">
+        <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+          <div className="w-1 h-6 bg-purple-500 rounded-full"></div>
+          Actual Budget Configuration
+        </h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="space-y-2">
+            <label className="text-sm text-slate-400">Server URL</label>
+            <input
+              type="text"
+              name="actualServerUrl"
+              value={formData.actualServerUrl}
+              onChange={handleChange}
+              className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-purple-500 outline-none transition-all"
+              placeholder="http://localhost:5006"
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm text-slate-400">Budget Sync ID</label>
+            <input
+              type="text"
+              name="actualBudgetId"
+              value={formData.actualBudgetId}
+              onChange={handleChange}
+              className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-purple-500 outline-none transition-all"
+            />
+          </div>
+          <div className="space-y-2 md:col-span-2">
+            <label className="text-sm text-slate-400">Budget Password (Optional)</label>
+            <input
+              type="password"
+              name="actualPassword"
+              value={formData.actualPassword}
+              onChange={handleChange}
+              className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-purple-500 outline-none transition-all"
+              placeholder="Required for E2E Encrypted files"
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* Categories Section */}
+      <section className="bg-slate-900 p-6 rounded-xl border border-slate-800">
+        <div className="flex justify-between items-center mb-4">
+            <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                <div className="w-1 h-6 bg-blue-500 rounded-full"></div>
+                Category Management
+            </h2>
+            <button
+                onClick={() => setIsEditingCats(!isEditingCats)}
+                className="text-sm bg-slate-800 hover:bg-slate-700 px-3 py-1 rounded text-slate-300 transition-colors"
+            >
+                {isEditingCats ? 'Cancel' : 'Edit JSON'}
+            </button>
+        </div>
+
+        {isEditingCats ? (
+            <div className="space-y-4">
+                <textarea
+                    value={jsonText}
+                    onChange={(e) => setJsonText(e.target.value)}
+                    className="w-full h-64 bg-slate-950 border border-slate-700 rounded-lg p-4 font-mono text-xs text-slate-300 focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+                {jsonError && <p className="text-red-500 text-sm">{jsonError}</p>}
+                <button
+                    onClick={handleSaveCategories}
+                    className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-bold"
+                >
+                    Save Categories
+                </button>
+            </div>
+        ) : (
+            <div className="bg-slate-950 rounded-lg border border-slate-800 p-4 max-h-64 overflow-y-auto">
+                <pre className="text-xs font-mono text-slate-400">
+                    {JSON.stringify(categories, null, 2)}
+                </pre>
+            </div>
+        )}
+      </section>
+
+      {/* Schedule Section */}
+      <section className="bg-slate-900 p-6 rounded-xl border border-slate-800">
+        <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+          <div className="w-1 h-6 bg-green-500 rounded-full"></div>
+          Automation
+        </h2>
+        <div className="space-y-2">
+            <label className="text-sm text-slate-400">Cron Schedule</label>
+            <div className="flex gap-2">
+                <input
+                    type="text"
+                    name="syncSchedule"
+                    value={formData.syncSchedule}
+                    onChange={handleChange}
+                    className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-green-500 outline-none transition-all font-mono"
+                    placeholder="0 0 * * *"
+                />
+                <button 
+                    onClick={() => setFormData(p => ({...p, syncSchedule: '0 0 * * *'}))}
+                    className="px-3 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300"
+                    title="Daily at Midnight"
+                >
+                    <RotateCcw size={16} />
+                </button>
+            </div>
+            <p className="text-xs text-slate-500">
+                Format: <span className="font-mono">Minute Hour Day Month DayOfWeek</span>
+            </p>
+        </div>
+      </section>
+
+      {/* Save Button */}
+      <div className="sticky bottom-6 flex justify-end">
         <button
-          type="submit"
-          className="flex items-center space-x-2 bg-slate-100 text-slate-900 px-6 py-2 rounded font-bold hover:bg-white transition-colors shadow-lg shadow-slate-900/50"
+            onClick={() => onSave(formData)}
+            className="flex items-center gap-2 bg-investec-500 hover:bg-yellow-400 text-black px-8 py-3 rounded-xl font-bold shadow-lg shadow-yellow-900/20 transition-all transform hover:scale-105"
         >
-          <Save size={18} />
-          <span>Save Configuration</span>
+            <Save size={20} />
+            Save Configuration
         </button>
       </div>
-    </form>
+
+    </div>
   );
 };

@@ -2,6 +2,24 @@
 
 A self-hosted dashboard to automatically synchronise transactions from Investec South Africa (OpenAPI) to Actual Budget.
 
+## Security First
+
+Code security is actively monitored by **Snyk** to ensure dependencies and container images remain free of known vulnerabilities.
+
+[![Known Vulnerabilities](https://snyk.io/test/github/sean-gordon/Investec-ActualBudget/badge.svg)](https://snyk.io/test/github/sean-gordon/Investec-ActualBudget)
+
+### 🛡️ Architecture & Data Privacy
+
+*   **Process Isolation**: The sync engine runs in a dedicated "Worker Process" that is spawned only when needed and terminates immediately after completion. This ensures:
+    *   **Memory Safety**: No residual data stays in memory.
+    *   **Database Integrity**: Prevents database locks by ensuring a clean connection lifecycle.
+*   **Containerized Environment**: The application runs within a Docker container, isolating it from the host system.
+    *   **Networking**: Internal communication between the frontend and backend occurs over a private internal network (when configured with `network_mode: bridge`).
+*   **Credential Handling**: 
+    *   Investec API keys and Actual Budget passwords are stored locally in `data/settings.json` within the container's volume.
+    *   Credentials are **never** transmitted to any third-party server. All traffic is strictly between your server, Investec, and your Actual Budget instance.
+*   **Source Code Transparency**: The entire project is open-source. You can inspect every line of code to verify how your data is handled.
+
 ## Features
 
 *   **Secure Architecture**: Uses process isolation for every sync to prevent database locks.
@@ -9,6 +27,7 @@ A self-hosted dashboard to automatically synchronise transactions from Investec 
 *   **Category Synchronisation**: Define your master category list in the Settings UI. The system ensures these groups and categories exist in your budget.
 *   **Smart Deduplication**: Prevents duplicate transactions even if run multiple times a day.
 *   **Transactions Only**: This tool merges transactions into your existing budget; it does not overwrite existing transaction data.
+*   **Auto-Update System**: Easily update to the latest version directly from the dashboard with a single click.
 
 ---
 
@@ -51,6 +70,25 @@ docker compose up -d --build
 ```
 
 The app will start on port **46490**.
+
+---
+
+## Updates & Maintenance
+
+Keeping the application up-to-date is simple.
+
+### Method 1: Automatic Update (Recommended)
+1.  Open the dashboard.
+2.  If a new version is available, an **Update Available** button will appear in the top header.
+3.  Click the button. The system will pull the latest code and rebuild itself automatically.
+
+### Method 2: Manual Update
+Run the following commands in your terminal inside the project folder:
+
+```bash
+git pull
+docker compose up -d --build
+```
 
 ---
 
@@ -97,7 +135,14 @@ This feature allows you to define a standard set of Category Groups and Categori
 }
 ```
 
-### 4. Automation
+### 4. Git Repository Control (New)
+*   **Host Project Path**: **(Important)** This is required for the "Update" and "Switch Branch" buttons to work.
+    *   Enter the absolute path to the project folder on your server (e.g., `/home/user/Investec-ActualBudget` or `/data/Investec-ActualBudget`).
+    *   *Why?* This allows the Docker container to correctly mount your source code during self-updates.
+    *   **Tip:** To find this path on Linux, open your terminal in the project folder and run: `pwd`
+*   **Target Branch**: Select a branch (like `main` or `Dev`) and click **Switch & Rebuild**.
+
+### 5. Automation
 *   **Cron Schedule**: Enter a cron expression to automate syncing.
     *   Run once a day at midnight: `0 0 * * *`
     *   Run every 6 hours: `0 */6 * * *`

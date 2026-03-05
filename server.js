@@ -5,14 +5,14 @@ import cron from 'node-cron';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { fork } from 'child_process';
+import { fork, exec } from 'child_process';
 import * as actual from '@actual-app/api';
 import dns from 'dns';
 
 /**
  * ============================================================================
  * INVESTEC TO ACTUAL SYNC SERVER
- * ============================================================================
+ * ============================================================================ 
  * Architecture: "Split-Brain" / Worker Model
  * 
  * 1. Main Process: 
@@ -44,7 +44,7 @@ const DATA_DIR = path.join(__dirname, 'data');
 const CONFIG_FILE = path.join(DATA_DIR, 'settings.json');
 const CATEGORIES_FILE = path.join(DATA_DIR, 'categories.json');
 const ACTUAL_DATA_DIR = path.join(DATA_DIR, 'actual-data');
-const SCRIPT_VERSION = "6.1.1 - UK English Update";
+const SCRIPT_VERSION = "6.2.2 - Git Host Path Support";
 
 // Disable Self-Signed Cert Rejection
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
@@ -134,9 +134,9 @@ const DEFAULT_CATEGORIES = {
   ]
 };
 
-// ============================================================================
+// ============================================================================ 
 // PART 1: WORKER PROCESS (The Engine)
-// ============================================================================
+// ============================================================================ 
 
 if (process.env.WORKER_ACTION) {
     const log = (msg, type = 'info') => {
@@ -455,9 +455,9 @@ if (process.env.WORKER_ACTION) {
     })();
 } else {
 
-// ============================================================================
+// ============================================================================ 
 // PART 2: MAIN SERVER PROCESS (The Coordinator)
-// ============================================================================
+// ============================================================================ 
 
 const app = express();
 
@@ -480,9 +480,23 @@ const ensureDataDir = () => {
 const loadConfig = () => {
     ensureDataDir();
     if (fs.existsSync(CONFIG_FILE)) {
-        try { return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8')); } catch (e) {}
+        try { 
+            return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8')); 
+        } catch (e) {
+            console.error(`Failed to load config from ${CONFIG_FILE}:`, e.message);
+            addLog(`Config Load Error: ${e.message}`, 'error');
+        }
+    } else {
+        console.log(`Config file not found at: ${CONFIG_FILE}`);
     }
     return {};
+};
+const setupCron = (schedule) => {
+    if (currentTask) { currentTask.stop(); currentTask = null; }
+    if (schedule && cron.validate(schedule)) {
+        currentTask = cron.schedule(schedule, () => runSync());
+        addLog(`Schedule updated: ${schedule}`, 'info');
+    }
 };
 const saveConfig = (cfg) => {
     ensureDataDir();
@@ -530,9 +544,9 @@ const spawnWorker = (action, payload) => {
 app.use(cors());
 app.use(bodyParser.json());
 
-app.get('/api/status', (req, res) => res.json({ 
-    isProcessing, 
-    lastSyncTime, 
+app.get('/api/status', (req, res) => res.json({
+    isProcessing,
+    lastSyncTime,
     version: SCRIPT_VERSION,
     budgetLoaded: !!loadConfig().actualBudgetId 
 }));
@@ -592,13 +606,189 @@ app.post('/api/sync', (req, res) => {
     res.json({ status: 'started' });
 });
 
-const setupCron = (schedule) => {
-    if (currentTask) { currentTask.stop(); currentTask = null; }
-    if (schedule && cron.validate(schedule)) {
-        currentTask = cron.schedule(schedule, () => runSync());
-        addLog(`Schedule updated: ${schedule}`, 'info');
+app.get('/api/version-check', async (req, res) => {
+    try {
+        const localPackage = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf-8'));
+        const remoteRes = await fetch('https://raw.githubusercontent.com/sean-gordon/Investec-ActualBudget/main/package.json');
+        
+        if (!remoteRes.ok) throw new Error('Failed to fetch remote version');
+        const remotePackage = await remoteRes.json();
+        
+        const isNewer = (current, latest) => {
+            const p1 = current.split('.').map(Number);
+            const p2 = latest.split('.').map(Number);
+            for (let i = 0; i < 3; i++) {
+                if (p2[i] > p1[i]) return true;
+                if (p2[i] < p1[i]) return false;
+            }
+            return false;
+        };
+
+        res.json({
+            current: localPackage.version,
+            latest: remotePackage.version,
+            updateAvailable: isNewer(localPackage.version, remotePackage.version)
+        });
+    } catch (e) {
+        addLog(`Version check failed: ${e.message}`, 'error');
+        res.status(500).json({ error: e.message });
     }
-};
+});
+
+app.get('/api/git/branches', async (req, res) => {
+    try {
+        const response = await fetch('https://api.github.com/repos/sean-gordon/Investec-ActualBudget/branches');
+        if (!response.ok) throw new Error('Failed to fetch branches');
+        const data = await response.json();
+        const branches = data.map(b => b.name);
+        res.json(branches);
+    } catch (e) {
+        addLog(`Branch fetch error: ${e.message}`, 'error');
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.get('/api/git/current', (req, res) => {
+    const getBranch = (cmd) => new Promise(resolve => {
+        exec(cmd, { cwd: __dirname }, (err, stdout) => {
+            if (err || !stdout) resolve(null);
+            else resolve(stdout.trim());
+        });
+    });
+
+    (async () => {
+        // Method 1: Standard git command
+        let branch = await getBranch('git rev-parse --abbrev-ref HEAD');
+        
+        // Method 2: If we are in detached HEAD (e.g., CI or specific checkout), try getting ref name
+        if (!branch || branch === 'HEAD') {
+             const headRef = await getBranch('git symbolic-ref -q HEAD');
+             if (headRef) branch = headRef.replace('refs/heads/', '');
+        }
+
+        // Method 3: Check remotes to see what commit we are on
+        if (!branch || branch === 'HEAD') {
+             const hash = await getBranch('git rev-parse HEAD');
+             const allBranches = await getBranch('git branch -r --contains ' + hash);
+             if (allBranches) {
+                 // Clean up output like "origin/Dev", "origin/HEAD -> origin/main"
+                 const match = allBranches.split('\n')
+                    .map(b => b.trim().replace('origin/', ''))
+                    .find(b => !b.includes('HEAD'));
+                 if (match) branch = match;
+             }
+        }
+
+        res.json({ branch: branch || 'unknown' });
+    })();
+});
+
+app.get('/api/git/status', (req, res) => {
+    (async () => {
+        const getHash = (cmd) => new Promise(resolve => {
+            exec(cmd, { cwd: __dirname }, (err, stdout) => resolve(stdout ? stdout.trim() : null));
+        });
+
+        // 1. Get current branch
+        let branch = await getHash('git rev-parse --abbrev-ref HEAD');
+        if (!branch || branch === 'HEAD') {
+             // Fallback for detached head
+             const allBranches = await getHash('git branch -r --contains HEAD');
+             if (allBranches) {
+                 const match = allBranches.split('\n')
+                    .map(b => b.trim().replace('origin/', ''))
+                    .find(b => !b.includes('HEAD'));
+                 if (match) branch = match;
+             }
+        }
+        
+        if (!branch) return res.json({ updateAvailable: false, branch: 'unknown' });
+
+        // 2. Fetch latest info from remote (without merging)
+        await getHash('git fetch origin ' + branch);
+
+        // 3. Compare hashes
+        const localHash = await getHash('git rev-parse HEAD');
+        const remoteHash = await getHash(`git rev-parse origin/${branch}`);
+
+        const updateAvailable = localHash && remoteHash && localHash !== remoteHash;
+
+        res.json({
+            branch, 
+            localHash, 
+            remoteHash, 
+            updateAvailable 
+        });
+    })();
+});
+
+app.post('/api/git/switch', (req, res) => {
+    const { branch } = req.body;
+    // Validate branch name to prevent command injection
+    if (!branch || !/^[a-zA-Z0-9_\-\.]+$/.test(branch)) {
+        return res.status(400).json({ error: 'Invalid branch name' });
+    }
+
+    const config = loadConfig();
+    let hostDir = '';
+    
+    if (config.hostProjectRoot) {
+        // Simple sanitization: allow alphanumeric, slashes, dashes, underscores, dots, and spaces
+        // If it contains anything else (like semicolons or ampersands), ignore it to prevent injection
+        if (/^[a-zA-Z0-9_\-\.\/ ]+$/.test(config.hostProjectRoot)) {
+            hostDir = `HOST_DIR="${config.hostProjectRoot}"`;
+        } else {
+            addLog(`Security Warning: Invalid characters in Host Project Path. Ignoring.`, 'error');
+        }
+    }
+
+    addLog(`System switching to branch: ${branch}...`, 'info');
+    res.json({ status: 'updating', message: `Switching to ${branch}. Service will restart.` });
+    
+    setTimeout(() => {
+        // Use -B to force reset/create branch from origin, avoiding ambiguity with files
+        const cmd = `${hostDir} git fetch origin && git checkout -B ${branch} origin/${branch} && git pull origin ${branch} && ${hostDir} docker compose up -d --build`;
+        exec(cmd, { cwd: __dirname }, (error, stdout, stderr) => {
+            if (error) {
+                console.error(`Switch error: ${error}`);
+                addLog(`Branch switch failed: ${error.message}`, 'error');
+                return;
+            }
+            console.log(`Switch output: ${stdout}`);
+        });
+    }, 1000);
+});
+
+app.post('/api/update', (req, res) => {
+    addLog('System update initiated...', 'info');
+    res.json({ status: 'updating', message: 'Update started. Service will restart shortly.' });
+    
+    const config = loadConfig();
+    let hostDir = '';
+    
+    if (config.hostProjectRoot) {
+        // Simple sanitization: allow alphanumeric, slashes, dashes, underscores, dots, and spaces
+        // If it contains anything else (like semicolons or ampersands), ignore it to prevent injection
+        if (/^[a-zA-Z0-9_\-\.\/ ]+$/.test(config.hostProjectRoot)) {
+            hostDir = `HOST_DIR="${config.hostProjectRoot}"`;
+        } else {
+            addLog(`Security Warning: Invalid characters in Host Project Path. Ignoring.`, 'error');
+        }
+    }
+
+    // Run update in background
+    setTimeout(() => {
+        exec(`${hostDir} git pull && ${hostDir} docker compose up -d --build`, { cwd: __dirname }, (error, stdout, stderr) => {
+            if (error) {
+                console.error(`Update error: ${error}`);
+                addLog(`Update failed: ${error.message}`, 'error');
+                return;
+            }
+            console.log(`Update output: ${stdout}`);
+            if (stderr) console.error(`Update stderr: ${stderr}`);
+        });
+    }, 1000);
+});
 
 const initialConfig = loadConfig();
 setupCron(initialConfig.syncSchedule);
@@ -609,6 +799,18 @@ app.get('*', (req, res) => {
     if (fs.existsSync(p)) res.sendFile(p);
     else res.send('Investec Sync Server Running (Build pending)');
 });
+
+// --- STARTUP CHECKS ---
+setTimeout(() => {
+    // Check if we just switched branches
+    const config = loadConfig();
+    exec('git rev-parse --abbrev-ref HEAD', { cwd: __dirname }, (err, stdout) => {
+        if (!err && stdout) {
+            const currentBranch = stdout.trim();
+            addLog(`System startup complete. Active Branch: ${currentBranch}`, 'success');
+        }
+    });
+}, 5000); // Wait for server to fully initialize
 
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server v${SCRIPT_VERSION} listening on ${PORT}`);

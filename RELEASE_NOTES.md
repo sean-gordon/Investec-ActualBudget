@@ -1,3 +1,55 @@
+# Release v6.2.2 - Reliable Self-Updates
+
+## 🚀 Key Highlights
+This release perfects the self-update and branch switching mechanism by allowing you to specify the exact location of your project on the host server. This ensures Docker always mounts the correct files during an update.
+
+### ✨ New Features
+*   **Host Project Path Setting**: A new configuration field in "Git Repository Control" allows you to define the absolute path to your project (e.g., `/data/Investec-ActualBudget`).
+    *   **Why is this needed?** When running inside a container, the app doesn't know where it lives on your actual server. Telling it the path allows it to control the Docker Daemon correctly to rebuild itself.
+*   **Startup Confirmation**: The system now logs the active Git branch upon startup, confirming that your branch switch was successful.
+*   **GitHub Link**: Added a quick link to the GitHub repository in the dashboard header.
+
+### 🛠 Fixes
+*   **"Dubious Ownership" Error**: Fixed Git permission errors when accessing the mounted source code.
+*   **Frontend Asset Persistence**: Fixed an issue where the UI would disappear during development builds because of volume mounting.
+
+---
+
+# Release v6.2.1 - Git Integration & Self-Repair
+
+## 🚀 Key Highlights
+This release brings full Git integration to the dashboard, allowing you to switch branches (e.g., test new features in `Dev`) and repair the installation directly from the UI. It also fixes the underlying architecture to allow the container to update itself reliably.
+
+### ✨ New Features
+*   **Git Branch Switching**: You can now switch between different branches (like `Dev` or `main`) directly from the Settings menu.
+    *   **Auto-Rebuild**: Switching branches automatically pulls the new code and rebuilds the Docker container.
+*   **Self-Healing Architecture**:
+    *   **Docker Socket Mounting**: The container now has access to the host's Docker daemon, allowing it to restart and rebuild itself without user intervention.
+    *   **Host Volume Mounting**: The container now directly accesses the host's `.git` folder, ensuring `git pull` commands update the actual source code on your server.
+
+### 🛠 Fixes
+*   **Missing Dependencies**: Added `git` and `docker-cli` to the container image.
+*   **Update Loop**: Fixed an issue where the "Update" button would fail because the container couldn't see the git repository.
+
+---
+
+# Release v6.2.0 - Auto-Update & Version Control
+
+## 🚀 Key Highlights
+This release introduces a self-update mechanism, making it easier than ever to keep your sync tool running with the latest features and fixes.
+
+### ✨ New Features
+*   **Auto-Update System**: You can now update the application directly from the dashboard.
+    *   **Version Check**: The system automatically checks against the official GitHub repository for new releases.
+    *   **One-Click Update**: If a new version is available, a pulsing "Update Available" button appears in the header. Clicking it will pull the latest code and rebuild the container automatically.
+*   **Live Version Status**: The dashboard header now displays your current server version and connection status in real-time.
+
+### 🛠 Improvements
+*   **Version Visibility**: Added API endpoints to expose the running version to the frontend.
+*   **System Stability**: The update process safely restarts the service, ensuring configuration files remain intact.
+
+---
+
 # Release v6.1.1 - Category Management & UK Localisation
 
 ## 🚀 Key Highlights

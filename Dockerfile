@@ -25,7 +25,16 @@ WORKDIR /app
 
 # Install build tools for production dependency compilation
 # This is required because we are reinstalling modules in the clean stage
-RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
+# Added git for auto-update functionality and openssl for secure connections
+# Added curl and gnupg to install docker cli
+RUN apt-get update && apt-get install -y python3 make g++ git openssl ca-certificates curl gnupg && \
+    curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/debian $(grep -oP '(?<=^VERSION_CODENAME=)[a-z]+' /etc/os-release) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null && \
+    apt-get update && apt-get install -y docker-ce-cli && \
+    rm -rf /var/lib/apt/lists/*
+
+# Fix for "dubious ownership" error when /app is mounted from host
+RUN git config --global --add safe.directory /app
 
 # Copy package files
 COPY package.json package-lock.json* ./
@@ -34,8 +43,8 @@ COPY package.json package-lock.json* ./
 # This recompiles better-sqlite3 for the production environment
 RUN npm install --omit=dev
 
-# Copy built assets from builder stage
-COPY --from=builder /app/dist ./dist
+# Copy built assets from builder stage to a safe location
+COPY --from=builder /app/dist /app-dist
 
 # Copy server script
 COPY server.js .
@@ -47,4 +56,6 @@ RUN mkdir -p data
 EXPOSE 46490
 
 # Start the backend server
-CMD ["node", "server.js"]
+# We copy assets from the safe /app-dist location to the mounted /app/dist folder at runtime
+# This ensures the frontend works even when the root directory is mounted from the host
+CMD ["sh", "-c", "mkdir -p dist && cp -r /app-dist/* dist/ && node server.js"]

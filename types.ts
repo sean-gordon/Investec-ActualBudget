@@ -6,6 +6,7 @@ export interface AppConfig {
   actualPassword?: string;
   actualBudgetId: string;
   syncSchedule: string; // Cron expression
+  hostProjectRoot?: string; // Absolute path on the host machine
 }
 
 export interface CategoryTree {

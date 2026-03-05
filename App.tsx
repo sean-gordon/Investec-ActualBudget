@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Activity, Settings, Play, CreditCard, ExternalLink, Wifi, Clock } from 'lucide-react';
+import { Activity, Settings, Play, CreditCard, ExternalLink, Wifi, Clock, Download, Github } from 'lucide-react';
 import { AppConfig, LogEntry } from './types';
 import { SettingsForm } from './components/SettingsForm';
 import { LogConsole } from './components/LogConsole';
@@ -23,6 +23,8 @@ export default function App() {
   const [serverVersion, setServerVersion] = useState<string>('Unknown');
   const [lastSyncTime, setLastSyncTime] = useState<number | null>(null);
   const [isBudgetLoaded, setIsBudgetLoaded] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<{ available: boolean; latest: string } | null>(null);
+  const [isUpdating, setIsUpdating] = useState(false);
 
   const fetchJson = async (url: string, options?: RequestInit) => {
     try {
@@ -45,6 +47,15 @@ export default function App() {
     // Initial Load
     fetchJson(`${API_BASE}/config`)
       .then(data => setConfig(data))
+      .catch(console.error);
+
+    // Check for updates
+    fetchJson(`${API_BASE}/version-check`)
+      .then(data => {
+        if (data.updateAvailable) {
+          setUpdateInfo({ available: true, latest: data.latest });
+        }
+      })
       .catch(console.error);
 
     // Poll Status and Logs
@@ -118,12 +129,44 @@ export default function App() {
             </div>
           </div>
         </div>
-        <button
-          onClick={() => setView(view === 'dashboard' ? 'settings' : 'dashboard')}
-          className={`p-2 rounded-full hover:bg-slate-800 transition-colors ${view === 'settings' ? 'bg-slate-800 text-white' : 'text-slate-400'}`}
-        >
-          <Settings size={20} />
-        </button>
+        <div className="flex items-center gap-3">
+          {updateInfo?.available && (
+            <button
+              onClick={async () => {
+                if (!confirm(`Update to version ${updateInfo.latest}? The server will restart.`)) return;
+                setIsUpdating(true);
+                try {
+                  await fetchJson(`${API_BASE}/update`, { method: 'POST' });
+                  alert("Update started! The page will reload in 10 seconds.");
+                  setTimeout(() => window.location.reload(), 10000);
+                } catch (e) {
+                  alert("Update failed to start.");
+                  setIsUpdating(false);
+                }
+              }}
+              disabled={isUpdating}
+              className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-full transition-all animate-pulse"
+            >
+              <Download size={14} />
+              {isUpdating ? 'Updating...' : 'Update Available'}
+            </button>
+          )}
+          <a 
+            href="https://github.com/sean-gordon/Investec-ActualBudget" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="p-2 rounded-full hover:bg-slate-800 transition-colors text-slate-400"
+            title="View on GitHub"
+          >
+            <Github size={20} />
+          </a>
+          <button
+            onClick={() => setView(view === 'dashboard' ? 'settings' : 'dashboard')}
+            className={`p-2 rounded-full hover:bg-slate-800 transition-colors ${view === 'settings' ? 'bg-slate-800 text-white' : 'text-slate-400'}`}
+          >
+            <Settings size={20} />
+          </button>
+        </div>
       </header>
 
       {/* Content */}
