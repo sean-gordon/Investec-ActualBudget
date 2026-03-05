@@ -1,29 +1,49 @@
-# Use Node 20 Alpine for a small footprint
-FROM node:20-alpine
+# Stage 1: Build the React application
+FROM node:20-slim as builder
 
-# Set working directory
+# Install build tools required for better-sqlite3 (native module used by Actual API)
+RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
-# Install build tools for native dependencies (better-sqlite3) and SSL libraries
-# Python3, make, and g++ are required for node-gyp
-# openssl and ca-certificates are required for reliable HTTPS connections
-RUN apk add --no-cache python3 make g++ openssl ca-certificates
+# Copy package files
+COPY package.json package-lock.json* ./
 
-# Force Root user to ensure write permissions on mapped volumes
-USER root
-
-# Install dependencies
-COPY package*.json ./
-# Use npm install to generate lockfile if missing and avoid EUSAGE errors
+# Install all dependencies (including devDependencies for building)
 RUN npm install
 
 # Copy source code
 COPY . .
 
-# Build the frontend (Vite)
+# Build the frontend
 RUN npm run build
 
-# Expose the port
+# Stage 2: Production Server
+FROM node:20-slim
+
+WORKDIR /app
+
+# Install build tools for production dependency compilation
+# This is required because we are reinstalling modules in the clean stage
+RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
+
+# Copy package files
+COPY package.json package-lock.json* ./
+
+# Install only production dependencies
+# This recompiles better-sqlite3 for the production environment
+RUN npm install --omit=dev
+
+# Copy built assets from builder stage
+COPY --from=builder /app/dist ./dist
+
+# Copy server script
+COPY server.js .
+
+# Create data directory for volume
+RUN mkdir -p data
+
+# Expose the application port
 EXPOSE 46490
 
 # Start the backend server
