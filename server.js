@@ -591,12 +591,19 @@ const spawnWorker = (action, payload) => {
             }
         });
 
+        const timeout = setTimeout(() => {
+            child.kill();
+            addLog(`Worker timed out after 5 minutes`, 'error');
+            resolve({ success: false, message: "Worker timed out" });
+        }, 300000); // 5 minute timeout
+
         child.on('message', (msg) => {
             if (msg.type === 'log') addLog(msg.message, msg.level);
             if (msg.type === 'result') resolve(msg);
         });
 
         child.on('exit', (code) => {
+            clearTimeout(timeout);
             if (code !== 0) resolve({ success: false, message: "Process failed unexpectedly" });
             else resolve({ success: true });
         });
@@ -742,7 +749,13 @@ app.get('/api/git/branches', async (req, res) => {
 app.get('/api/git/status', (req, res) => {
     (async () => {
         const getHash = (cmd) => new Promise(resolve => {
-            exec(cmd, { cwd: __dirname }, (err, stdout) => resolve(stdout ? stdout.trim() : null));
+            exec(cmd, { cwd: __dirname }, (err, stdout) => {
+                if (err) {
+                    console.error(`Git command failed: ${cmd}`, err);
+                    return resolve(null);
+                }
+                resolve(stdout ? stdout.trim() : null);
+            });
         });
 
         // 1. Get current branch
@@ -786,25 +799,17 @@ app.post('/api/git/switch', (req, res) => {
     }
 
     const config = loadConfig();
-    let hostDir = '';
-    
-    if (config.hostProjectRoot) {
-        // Simple sanitization: allow alphanumeric, slashes, dashes, underscores, dots, and spaces
-        // If it contains anything else (like semicolons or ampersands), ignore it to prevent injection
-        if (/^[a-zA-Z0-9_\-\.\/ ]+$/.test(config.hostProjectRoot)) {
-            hostDir = `HOST_DIR="${config.hostProjectRoot}"`;
-        } else {
-            addLog(`Security Warning: Invalid characters in Host Project Path. Ignoring.`, 'error');
-        }
-    }
+    const hostDirEnv = config.hostProjectRoot && /^[a-zA-Z0-9_\-\.\/ ]+$/.test(config.hostProjectRoot) 
+        ? { HOST_DIR: config.hostProjectRoot } 
+        : {};
 
     addLog(`System switching to branch: ${branch}...`, 'info');
     res.json({ status: 'updating', message: `Switching to ${branch}. Service will restart.` });
     
     setTimeout(() => {
         // Use -B to force reset/create branch from origin, avoiding ambiguity with files
-        const cmd = `${hostDir} git fetch origin && git checkout -B ${branch} origin/${branch} && git pull origin ${branch} && ${hostDir} docker compose up -d --build`;
-        exec(cmd, { cwd: __dirname }, (error, stdout, stderr) => {
+        const cmd = `git fetch origin && git checkout -B ${branch} origin/${branch} && git pull origin ${branch} && ${hostDirEnv.HOST_DIR ? 'HOST_DIR="$HOST_DIR" ' : ''}docker compose up -d --build`;
+        exec(cmd, { cwd: __dirname, env: { ...process.env, ...hostDirEnv } }, (error, stdout, stderr) => {
             if (error) {
                 console.error(`Switch error: ${error}`);
                 addLog(`Branch switch failed: ${error.message}`, 'error');
@@ -855,23 +860,21 @@ app.post('/api/update', (req, res) => {
     res.json({ status: 'updating', message: 'Update started. Check /api/debug/update-log for details. Service will restart shortly.' });
     
     const config = loadConfig();
-    let hostDirPrefix = '';
-    
-    if (config.hostProjectRoot) {
-        if (/^[a-zA-Z0-9_\-\.\/ ]+$/.test(config.hostProjectRoot)) {
-            hostDirPrefix = `HOST_DIR="${config.hostProjectRoot}"`;
-        } else {
-            const msg = `Security Warning: Invalid characters in Host Project Path. Ignoring.`;
-            addLog(msg, 'error');
-            logToFile(msg);
-        }
-    } else {
+    const hostDirEnv = config.hostProjectRoot && /^[a-zA-Z0-9_\-\.\/ ]+$/.test(config.hostProjectRoot) 
+        ? { HOST_DIR: config.hostProjectRoot } 
+        : {};
+
+    if (!hostDirEnv.HOST_DIR && config.hostProjectRoot) {
+        const msg = `Security Warning: Invalid characters in Host Project Path. Ignoring.`;
+        addLog(msg, 'error');
+        logToFile(msg);
+    } else if (!hostDirEnv.HOST_DIR) {
         logToFile("WARNING: 'Host Project Path' is not set. Docker bind mounts might fail if not running in development.");
     }
 
     const runCmd = (cmd, desc) => new Promise((resolve, reject) => {
         logToFile(`Running: ${desc} (${cmd})`);
-        exec(cmd, { cwd: __dirname }, (error, stdout, stderr) => {
+        exec(cmd, { cwd: __dirname, env: { ...process.env, ...hostDirEnv } }, (error, stdout, stderr) => {
             if (stdout) logToFile(`[STDOUT] ${stdout.trim()}`);
             if (stderr) logToFile(`[STDERR] ${stderr.trim()}`);
             
@@ -892,15 +895,13 @@ app.post('/api/update', (req, res) => {
             await runCmd('docker compose version', 'Check Docker Compose');
 
             // 2. Git Pull
-            await runCmd(`${hostDirPrefix} git fetch --all && git pull`, 'Git Pull');
+            await runCmd(`git fetch --all && git pull`, 'Git Pull');
 
             // 3. Update Container (Build + Up + Force Recreate + Remove Orphans)
             // This single command is safer and more robust than splitting them.
             // It ensures the running container is replaced by the newly built image.
-            await runCmd(
-                `${hostDirPrefix} docker compose up -d --build --force-recreate --remove-orphans`, 
-                'Docker Build & Up'
-            );
+            const composeCmd = `${hostDirEnv.HOST_DIR ? 'HOST_DIR="$HOST_DIR" ' : ''}docker compose up -d --build --force-recreate --remove-orphans`;
+            await runCmd(composeCmd, 'Docker Build & Up');
 
             // 4. Prune old images to save space
             try {

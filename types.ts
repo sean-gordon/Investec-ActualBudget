@@ -46,7 +46,7 @@ export interface InvestecAccount {
 
 export interface InvestecTransaction {
   accountId: string;
-  type: string;
+  type: 'DEBIT' | 'CREDIT';
   transactionType: string;
   status: string;
   description: string;
