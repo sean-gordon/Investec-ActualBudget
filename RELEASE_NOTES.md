@@ -1,85 +1,29 @@
-# Release v6.2.2 - Reliable Self-Updates
+# Release v6.5.0 - Stable
 
 ## 🚀 Key Highlights
-This release perfects the self-update and branch switching mechanism by allowing you to specify the exact location of your project on the host server. This ensures Docker always mounts the correct files during an update.
 
-### ✨ New Features
-*   **Host Project Path Setting**: A new configuration field in "Git Repository Control" allows you to define the absolute path to your project (e.g., `/data/Investec-ActualBudget`).
-    *   **Why is this needed?** When running inside a container, the app doesn't know where it lives on your actual server. Telling it the path allows it to control the Docker Daemon correctly to rebuild itself.
-*   **Startup Confirmation**: The system now logs the active Git branch upon startup, confirming that your branch switch was successful.
-*   **GitHub Link**: Added a quick link to the GitHub repository in the dashboard header.
+This release represents a significant step towards a more robust, user-friendly, and transparent Investec Sync experience. It consolidates numerous fixes and features across multiple development cycles into a single, stable version.
 
-### 🛠 Fixes
-*   **"Dubious Ownership" Error**: Fixed Git permission errors when accessing the mounted source code.
-*   **Frontend Asset Persistence**: Fixed an issue where the UI would disappear during development builds because of volume mounting.
+### ✨ New Features & Major Improvements
 
----
+*   **Reliable Auto-Update System**:
+    *   **Self-Update Repair**: Critical fixes ensure the `docker compose` command executes correctly within the container by integrating `docker-compose-plugin`, enabling seamless, one-click updates directly from the UI.
+    *   **Robust Update Process**: The update now uses a single, powerful command (`docker compose up -d --build --force-recreate --remove-orphans`) to build, replace, and clean up containers atomically, ensuring new code is always activated.
+    *   **Update Debugging**: Persistent logs of the update process are now stored in `data/update.log`, accessible via a new UI button or API endpoint (`/api/debug/update-log`), greatly simplifying troubleshooting.
+    *   **Automated Cleanup**: Old Docker images are automatically pruned after updates to reclaim disk space.
+*   **Integrated & Contextual Log Viewer**:
+    *   **Unified Log Console**: Merges System logs (Investec Sync events) and Actual AI logs (from your AI container) into a single, chronologically sorted stream.
+    *   **Profile-Driven Display**: Clicking any profile row in the dashboard dynamically loads logs relevant to that specific profile.
+    *   **Smart Log Filtering**: System logs are intelligently filtered to show only generic system events and events strictly pertaining to the selected profile. This includes advanced logic to prevent logs from profiles with overlapping names (e.g., "Sean" and "Sean Investec") from appearing incorrectly in other profiles' views.
+    *   **Instant Log Clearing**: The log display now clears immediately upon profile switch, preventing "ghost logs" and providing a cleaner transition.
+    *   **Actual AI Log Viewer**: Directly monitor live logs from your associated Actual AI Docker container. The profile settings now detect and list running Docker containers for easy selection.
+*   **Enhanced UI/UX**:
+    *   **Update History Button**: A dedicated button in the log panel header (`📄` icon) to toggle between live logs and the persistent update history.
+    *   **Clearer Status Indicators**: Improved visual feedback for sync profiles.
+    *   **Refined Settings**: Streamlined profile management and Git control.
 
-# Release v6.2.1 - Git Integration & Self-Repair
+### 🛠 Other Fixes
 
-## 🚀 Key Highlights
-This release brings full Git integration to the dashboard, allowing you to switch branches (e.g., test new features in `Dev`) and repair the installation directly from the UI. It also fixes the underlying architecture to allow the container to update itself reliably.
+*   **Log Parsing**: Enhanced Docker log fetching to ensure correct timestamp parsing and sorting in the merged view.
+*   **System Stability**: General stability improvements and minor bug fixes across the application.
 
-### ✨ New Features
-*   **Git Branch Switching**: You can now switch between different branches (like `Dev` or `main`) directly from the Settings menu.
-    *   **Auto-Rebuild**: Switching branches automatically pulls the new code and rebuilds the Docker container.
-*   **Self-Healing Architecture**:
-    *   **Docker Socket Mounting**: The container now has access to the host's Docker daemon, allowing it to restart and rebuild itself without user intervention.
-    *   **Host Volume Mounting**: The container now directly accesses the host's `.git` folder, ensuring `git pull` commands update the actual source code on your server.
-
-### 🛠 Fixes
-*   **Missing Dependencies**: Added `git` and `docker-cli` to the container image.
-*   **Update Loop**: Fixed an issue where the "Update" button would fail because the container couldn't see the git repository.
-
----
-
-# Release v6.2.0 - Auto-Update & Version Control
-
-## 🚀 Key Highlights
-This release introduces a self-update mechanism, making it easier than ever to keep your sync tool running with the latest features and fixes.
-
-### ✨ New Features
-*   **Auto-Update System**: You can now update the application directly from the dashboard.
-    *   **Version Check**: The system automatically checks against the official GitHub repository for new releases.
-    *   **One-Click Update**: If a new version is available, a pulsing "Update Available" button appears in the header. Clicking it will pull the latest code and rebuild the container automatically.
-*   **Live Version Status**: The dashboard header now displays your current server version and connection status in real-time.
-
-### 🛠 Improvements
-*   **Version Visibility**: Added API endpoints to expose the running version to the frontend.
-*   **System Stability**: The update process safely restarts the service, ensuring configuration files remain intact.
-
----
-
-# Release v6.1.1 - Category Management & UK Localisation
-
-## 🚀 Key Highlights
-This release introduces powerful new tools for managing your budget structure and aligns the application with British English standards.
-
-### ✨ New Features
-*   **Category Management**: You can now define a master list of Category Groups and Categories in the Settings UI.
-    *   **Additive Sync**: The system checks your budget during every sync. If a category is missing, it is automatically created. Existing categories are never deleted or modified.
-    *   **JSON Editor**: Easily configure your tree structure directly in the dashboard.
-*   **Actual AI Integration**: Documentation added for integrating with **Actual AI** to automate transaction categorisation after syncing.
-
-### 🛠 Major Fixes & Improvements
-*   **UK English Localisation**: Updated all logs, comments, and documentation to British English (e.g., *Synchronisation*, *Initialise*).
-*   **Process Isolation**: The sync engine runs in a separate "Worker Process" for every action to prevent database locks and ensure memory stability.
-*   **Authentication Overhaul**: Fixed connection logic to match the official Actual AI implementation. Now correctly handles Server Passwords vs End-to-End Encryption passwords, resolving "Could not get remote files" errors.
-*   **Account Separation**: Fixed a bug where multiple Investec accounts were merging into one. Accounts are now uniquely identified by your Investec Reference Name (Nickname) or Product Name + Last 4 Digits.
-*   **Automatic Account Creation**: If an Investec account doesn't exist in Actual, it is automatically created with the correct type (Checking/Credit).
-
-### 🐳 Docker & Networking
-*   **SSL Support**: Added native SSL libraries (`openssl`, `ca-certificates`) to the container to ensure robust secure connections to Investec and self-hosted servers.
-*   **IPv4 Enforcement**: Fixed Node.js connection failures to `localhost` inside Docker.
-
-## 📦 Upgrade Instructions
-
-1.  **Pull the latest changes**:
-    ```bash
-    git pull
-    ```
-
-2.  **Rebuild the container** (Required for new features):
-    ```bash
-    docker compose up -d --build
-    ```
