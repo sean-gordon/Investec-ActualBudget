@@ -8,6 +8,7 @@ export interface SyncProfile {
   actualServerUrl: string;
   actualPassword?: string;
   actualBudgetId: string;
+  actualAiContainer?: string;
   syncSchedule: string; // Cron expression
   categories?: CategoryTree;
 }
@@ -25,6 +26,7 @@ export interface LogEntry {
   timestamp: number;
   message: string;
   type: 'info' | 'error' | 'success';
+  source?: 'System' | 'Actual AI';
 }
 
 export interface InvestecTokenResponse {
