@@ -1,10 +1,7 @@
 services:
   investec-sync:
     build: .
-    ports:
-      - "46490:46490"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    network_mode: "host"
     volumes:
       - ./data:/app/data
     environment:

@@ -5,435 +5,485 @@ import cron from 'node-cron';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { fork } from 'child_process';
 import * as actual from '@actual-app/api';
+import dns from 'dns';
 
-// --- setup ---
+// --- NETWORK FIX ---
+// Node 17+ prefers IPv6. In Docker/Localhost environments, this often fails if 
+// the server listens on 127.0.0.1 (IPv4) but Node tries ::1.
+if (dns.setDefaultResultOrder) {
+    dns.setDefaultResultOrder('ipv4first');
+}
+
+// --- CONFIGURATION ---
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const app = express();
 const PORT = process.env.PORT || 46490;
 const DATA_DIR = path.join(__dirname, 'data');
 const CONFIG_FILE = path.join(DATA_DIR, 'settings.json');
 const ACTUAL_DATA_DIR = path.join(DATA_DIR, 'actual-data');
 
-// Fix for self-signed certs or local network issues
+// Fix for self-signed certs
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
-// VERSION TRACKING
-const SCRIPT_VERSION = "2.13.0 - Server URL Fix";
+const SCRIPT_VERSION = "5.1.0 - Account Separation Fix";
 
-// --- Global Error Handlers ---
-process.on('uncaughtException', (err) => {
-  console.error('CRITICAL: Uncaught Exception:', err);
-  try {
-    if (typeof logs !== 'undefined') logs.push({ timestamp: Date.now(), message: `System Critical: ${err.message}`, type: 'error' });
-  } catch (e) {}
-});
+// ==========================================
+// WORKER PROCESS LOGIC
+// ==========================================
+// This block only runs when the script is spawned as a child process
+if (process.env.WORKER_ACTION) {
+    // Ensure TLS reject is disabled in worker too
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('CRITICAL: Unhandled Rejection:', reason);
-});
+    const log = (msg, type = 'info') => {
+        if (process.send) process.send({ type: 'log', message: msg, level: type });
+    };
 
-// --- Middleware ---
-app.use(cors());
-app.use(bodyParser.json());
+    const action = process.env.WORKER_ACTION;
+    const payload = JSON.parse(process.env.WORKER_PAYLOAD || '{}');
 
-// --- State ---
-let currentTask = null;
+    (async () => {
+        try {
+            log(`Worker started: ${action}`, 'info');
+
+            // --- HELPER: Database Cleanup ---
+            const cleanDataDir = () => {
+                try {
+                    if (fs.existsSync(ACTUAL_DATA_DIR)) {
+                        fs.rmSync(ACTUAL_DATA_DIR, { recursive: true, force: true });
+                    }
+                    fs.mkdirSync(ACTUAL_DATA_DIR, { recursive: true });
+                } catch (e) {
+                    log(`Cleanup warning: ${e.message}`, 'error');
+                }
+            };
+
+            // --- HELPER: Transaction Transformation ---
+            const transformTransaction = (t) => {
+                // 1. Amount: Actual uses integer Milliunits (e.g. 10.50 => 1050)
+                let amount = Math.round(t.amount * 100);
+                if (t.type === 'DEBIT') amount = -Math.abs(amount);
+                else amount = Math.abs(amount);
+
+                // 2. Date Priority
+                // Credit cards often have transactionDate but no postingDate until cleared.
+                // We prefer transactionDate (when you bought it) over postingDate (when bank processed it).
+                let date = t.transactionDate || t.postingDate || t.actionDate;
+                
+                // Fallback / Validation
+                if (!date) {
+                    // Log warning if possible, but for map function we just return a valid date or null to filter later
+                    // If we return today's date, it confuses the user. better to skip? 
+                    // Let's use valueDate as last resort
+                    date = t.valueDate;
+                }
+                
+                // Ensure YYYY-MM-DD
+                if (date && date.includes('T')) {
+                    date = date.split('T')[0];
+                }
+
+                // 3. Notes
+                const notesParts = [];
+                if (t.transactionType) notesParts.push(`Type: ${t.transactionType}`);
+                if (t.cardNumber) notesParts.push(`Ref: ${t.cardNumber}`);
+                const notes = notesParts.join(' | ');
+
+                // 4. Description & ID
+                const payee = t.description || 'Unknown Payee';
+                const safeDesc = payee.replace(/[^a-z0-9]/gi, '').substring(0, 30);
+                
+                // CRITICAL: Deduplication Logic
+                // We use postedOrder if it exists (0 is valid!). If not, we use description/amount.
+                const orderSuffix = (t.postedOrder !== undefined && t.postedOrder !== null) 
+                    ? `:${t.postedOrder}` 
+                    : `:${Math.abs(amount)}`; 
+
+                // We keep accountId in the ID so uniqueness is preserved across multiple source accounts
+                // Use a fallback for date in ID to prevent 'undefined' in string
+                const idDate = date || 'nodate'; 
+                const importId = `${t.accountId}:${idDate}:${safeDesc}${orderSuffix}`;
+
+                return {
+                    date,
+                    amount,
+                    payee_name: payee,
+                    imported_payee: payee,
+                    notes,
+                    imported_id: importId,
+                    cleared: true,
+                };
+            };
+
+            // --- HELPER: Investec Fetch ---
+            const fetchInvestec = async (config) => {
+                const baseUrl = process.env.INVESTEC_BASE_URL || "https://openapi.investec.com";
+                
+                // 1. Auth
+                const authString = `${config.investecClientId}:${config.investecSecretId}`;
+                const base64Auth = Buffer.from(authString).toString('base64');
+                const authRes = await fetch(`${baseUrl}/identity/v2/oauth2/token`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Basic ${base64Auth}`,
+                        'x-api-key': config.investecApiKey,
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: new URLSearchParams({ 'grant_type': 'client_credentials' }),
+                });
+
+                if (!authRes.ok) throw new Error(`Investec Auth Failed: ${authRes.statusText}`);
+                const authData = await authRes.json();
+                const token = authData.access_token;
+
+                // 2. Accounts
+                const accRes = await fetch(`${baseUrl}/za/pb/v1/accounts`, {
+                    headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
+                });
+                const accData = await accRes.json();
+                const accounts = accData?.data?.accounts || [];
+
+                return { token, accounts, baseUrl };
+            };
+
+
+            // --- ACTION: TEST INVESTEC ---
+            if (action === 'test-investec') {
+                const data = await fetchInvestec(payload);
+                process.send({ type: 'result', success: true, message: `Success! Found ${data.accounts.length} accounts.` });
+                return;
+            }
+
+            // --- ACTION: TEST ACTUAL / SYNC ---
+            if (action === 'test-actual' || action === 'sync') {
+                
+                // --- SANITIZATION ---
+                const rawUrl = payload.actualServerUrl || '';
+                const serverUrl = rawUrl.replace(/\/$/, '').trim(); 
+                const rawPass = payload.actualPassword || '';
+                const password = rawPass.trim();
+                const rawId = payload.actualBudgetId || '';
+                const budgetId = rawId.trim();
+
+                if (!serverUrl || !budgetId) {
+                    throw new Error("Missing Server URL or Budget ID");
+                }
+
+                // Debug Log (Masked & Length Checked)
+                const maskedPass = password ? `${password.substring(0,2)}***${password.slice(-2)}` : '(none)';
+                log(`Config: URL=${serverUrl} | ID=${budgetId.substring(0,8)}... | Pass=${maskedPass}`, 'info');
+
+                // 1. HTTP Network Diagnostic
+                log(`Network Check: ${serverUrl}/info...`, 'info');
+                try {
+                    const infoRes = await fetch(`${serverUrl}/info`);
+                    if (!infoRes.ok) throw new Error(`Status ${infoRes.status}`);
+                    log(`Server reachable.`, 'success');
+                } catch (err) {
+                    throw new Error(`Network Error: Cannot reach ${serverUrl}. Details: ${err.message}`);
+                }
+
+                // 2. Clean Start
+                cleanDataDir();
+                log(`Initializing API Engine...`, 'info');
+                
+                const initConfig = {
+                    dataDir: ACTUAL_DATA_DIR,
+                    serverURL: serverUrl,
+                    password: password && password.length > 0 ? password : undefined
+                };
+                
+                await actual.init(initConfig);
+                
+                // 3. Download
+                log(`Fetching budget context...`, 'info');
+                
+                try {
+                    await actual.downloadBudget(budgetId); 
+                } catch (dlErr) {
+                    const errString = dlErr.toString().toLowerCase();
+                    const isAuthError = errString.includes('invalid-password') || errString.includes('encryption');
+                    
+                    if (isAuthError && initConfig.password) {
+                         log(`File encrypted. Retrying with password...`, 'info');
+                         try {
+                             await actual.downloadBudget(budgetId, { password: initConfig.password });
+                         } catch (retryErr) {
+                             throw new Error(`Decryption Failed: ${retryErr.message}`);
+                         }
+                    } else if (errString.includes('could not get remote files') || errString.includes('not found')) {
+                         throw new Error(`SERVER ERROR: Budget file "${budgetId}" not found.\n\n⚠️ ACTION REQUIRED: Open Actual in browser -> File > Close File.\nVerify it says "Remote". If "Local", Export/Import to upload it.`);
+                    } else {
+                        throw dlErr;
+                    }
+                }
+
+                if (action === 'test-actual') {
+                    process.send({ type: 'result', success: true, message: "Connection verified! Ready to sync." });
+                    return;
+                }
+
+                // --- SYNC LOGIC ---
+                log('Budget loaded. Starting Sync...', 'success');
+                
+                // Fetch Investec
+                log('Fetching Investec data...', 'info');
+                const investecData = await fetchInvestec(payload);
+                log(`Found ${investecData.accounts.length} bank accounts.`, 'info');
+
+                const endDate = new Date();
+                const startDate = new Date();
+                startDate.setFullYear(startDate.getFullYear() - 1); // 1 Year back
+                const fromStr = startDate.toISOString().split('T')[0];
+                const toStr = endDate.toISOString().split('T')[0];
+
+                let actualAccounts = await actual.getAccounts();
+                let totalImported = 0;
+
+                // --- ACCOUNT MAPPING LOOP ---
+                for (const invAcc of investecData.accounts) {
+                    // ACCOUNT NAMING STRATEGY
+                    // 1. Use Reference Name (User Nickname) if available
+                    // 2. Use Product Name + Last 4 digits if no Reference Name
+                    // This prevents "Mr SD Gordon" (accountName) from merging all 3 accounts
+                    let uniqueName = invAcc.referenceName;
+                    if (!uniqueName || uniqueName.trim() === '') {
+                         uniqueName = `${invAcc.productName} ${invAcc.accountNumber.slice(-4)}`;
+                    }
+                    uniqueName = uniqueName.trim();
+
+                    // Determine type based on product name
+                    let accType = 'checking'; 
+                    const prodNameLower = (invAcc.productName || "").toLowerCase();
+                    if (prodNameLower.includes('credit card') || prodNameLower.includes('private bank account') === false) { 
+                        // Simplified heuristic: if it says credit, it's credit. 
+                        if (prodNameLower.includes('credit')) accType = 'credit';
+                    }
+                    
+                    // 1. Find Account in Actual
+                    let matchedAccount = actualAccounts.find(a => 
+                        a.name.toLowerCase().trim() === uniqueName.toLowerCase()
+                    );
+
+                    // 2. Auto-Create if missing
+                    if (!matchedAccount) {
+                        log(`Account "${uniqueName}" (Investec) not found in Actual. Creating...`, 'info');
+                        
+                        try {
+                            const newId = await actual.createAccount({
+                                name: uniqueName,
+                                type: accType,
+                                offbudget: false
+                            });
+                            
+                            log(`✅ Created account: "${uniqueName}"`, 'success');
+                            
+                            // Refresh local list and update matchedAccount
+                            actualAccounts = await actual.getAccounts();
+                            matchedAccount = actualAccounts.find(a => a.id === newId);
+                        } catch (createErr) {
+                            log(`❌ Failed to create account "${uniqueName}": ${createErr.message}`, 'error');
+                            continue; 
+                        }
+                    }
+
+                    if (!matchedAccount) {
+                        log(`Skipping "${uniqueName}" (Sync Error).`, 'error');
+                        continue;
+                    }
+
+                    log(`Syncing: "${uniqueName}"`, 'info');
+
+                    // 3. Fetch Transactions for this specific account
+                    const txUrl = `${investecData.baseUrl}/za/pb/v1/accounts/${invAcc.accountId}/transactions?fromDate=${fromStr}&toDate=${toStr}`;
+                    const txRes = await fetch(txUrl, {
+                        headers: { 'Authorization': `Bearer ${investecData.token}`, 'Accept': 'application/json' },
+                    });
+                    const txData = await txRes.json();
+                    const rawTxs = (txData?.data?.transactions || []).map(t => ({ ...t, accountId: invAcc.accountId }));
+
+                    if (rawTxs.length > 0) {
+                        const actualTxs = rawTxs
+                            .map(transformTransaction)
+                            .filter(t => t.date); // Remove transactions where date failed to parse
+
+                        if (actualTxs.length < rawTxs.length) {
+                             log(`  ⚠️ Skipped ${rawTxs.length - actualTxs.length} transactions due to missing dates.`, 'info');
+                        }
+
+                        log(`  Importing ${actualTxs.length} transactions...`, 'info');
+                        
+                        const result = await actual.importTransactions(matchedAccount.id, actualTxs);
+                        
+                        const count = (result?.added?.length || 0) + (result?.updated?.length || 0);
+                        if (count > 0) {
+                            log(`  ✅ Added/Updated ${count} transactions.`, 'success');
+                            totalImported += count;
+                        } else {
+                            log(`  No new transactions.`, 'info');
+                        }
+                    } else {
+                        log(`  No transactions in date range.`, 'info');
+                    }
+                }
+
+                if (totalImported > 0) {
+                    log('Pushing changes to server...', 'info');
+                    await actual.sync(); 
+                    log(`Sync Complete. Total ${totalImported} new transactions.`, 'success');
+                } else {
+                    log('Sync Complete. No data changes.', 'info');
+                }
+            }
+
+        } catch (e) {
+            let msg = e.message;
+            log(`ERROR: ${msg}`, 'error');
+            if (process.send) process.send({ type: 'result', success: false, message: msg });
+            process.exit(1);
+        } finally {
+            try { await actual.shutdown(); } catch(e) {}
+            process.exit(0);
+        }
+    })();
+} else {
+
+// ==========================================
+// MAIN SERVER PROCESS
+// ==========================================
+
+const app = express();
+
+// --- STATE ---
 let isProcessing = false;
 let logs = [];
 let lastSyncTime = null;
 const MAX_LOGS = 100;
-
-// Singleton State for Actual API
-let isActualInitialized = false;
-let loadedBudgetId = null;
+let currentTask = null;
 
 const addLog = (message, type = 'info') => {
-  const entry = { timestamp: Date.now(), message, type };
-  logs.push(entry);
-  if (logs.length > MAX_LOGS) logs.shift();
-  
-  const icon = type === 'success' ? '✅' : type === 'error' ? '❌' : 'ℹ️';
-  if (type === 'error' || type === 'success') {
-    console.log(`${icon} [${type.toUpperCase()}] ${message}`);
-  }
+    const entry = { timestamp: Date.now(), message, type };
+    logs.push(entry);
+    if (logs.length > MAX_LOGS) logs.shift();
+    console.log(`${type === 'success' ? '✅' : type === 'error' ? '❌' : 'ℹ️'} ${message}`);
 };
 
-// --- Config Management ---
+// --- CONFIG UTILS ---
 const ensureDataDir = () => {
-  try {
     if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-    
-    // Ensure Actual Data Dir exists and is writable
-    if (!fs.existsSync(ACTUAL_DATA_DIR)) {
-        fs.mkdirSync(ACTUAL_DATA_DIR, { recursive: true });
-    }
-    
-    // Permission Test
-    const testFile = path.join(ACTUAL_DATA_DIR, 'perm-test');
-    fs.writeFileSync(testFile, 'ok');
-    fs.unlinkSync(testFile);
-  } catch (e) {
-    console.error("CRITICAL: Data directory is not writable.", e);
-    addLog(`CRITICAL: Data directory permission denied: ${e.message}`, 'error');
-  }
 };
-
 const loadConfig = () => {
-  ensureDataDir();
-  if (fs.existsSync(CONFIG_FILE)) {
-    try {
-      return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'));
-    } catch (e) {
-      console.error("Failed to read config file", e);
+    ensureDataDir();
+    if (fs.existsSync(CONFIG_FILE)) {
+        try { return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8')); } catch (e) {}
     }
-  }
-  return {
-    investecClientId: '',
-    investecSecretId: '',
-    investecApiKey: '',
-    actualServerUrl: '',
-    actualBudgetId: '',
-    actualPassword: '',
-    syncSchedule: '0 0 * * *'
-  };
+    return {};
+};
+const saveConfig = (cfg) => {
+    ensureDataDir();
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2));
+    setupCron(cfg.syncSchedule);
 };
 
-const saveConfig = (newConfig) => {
-  ensureDataDir();
-  const sanitizedConfig = { ...newConfig };
-  Object.keys(sanitizedConfig).forEach(key => {
-    if (typeof sanitizedConfig[key] === 'string') {
-      sanitizedConfig[key] = sanitizedConfig[key].trim();
-    }
-  });
-  
-  if (sanitizedConfig.actualServerUrl) {
-    // Remove trailing slashes
-    sanitizedConfig.actualServerUrl = sanitizedConfig.actualServerUrl.replace(/\/+$/, "");
-  }
+// --- WORKER SPAWNER ---
+const spawnWorker = (action, payload) => {
+    return new Promise((resolve) => {
+        const child = fork(__filename, {
+            env: { 
+                ...process.env, 
+                WORKER_ACTION: action,
+                WORKER_PAYLOAD: JSON.stringify(payload)
+            }
+        });
 
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify(sanitizedConfig, null, 2));
-  setupCron(sanitizedConfig.syncSchedule);
-};
+        child.on('message', (msg) => {
+            if (msg.type === 'log') addLog(msg.message, msg.level);
+            if (msg.type === 'result') resolve(msg);
+        });
 
-// --- Logic ---
-
-const getActualServerInfo = async (serverUrl) => {
-  try {
-    const response = await fetch(`${serverUrl}/mode`);
-    if (!response.ok) {
-      return { online: false, error: `HTTP ${response.status} - ${await response.text()}` };
-    }
-    const mode = await response.text();
-    return { online: true, mode };
-  } catch (e) {
-    return { online: false, error: e.message };
-  }
-};
-
-const resetActualState = async () => {
-  addLog('Performing HARD RESET of Actual API state...', 'info');
-  try { await actual.shutdown(); } catch(e) {}
-  isActualInitialized = false;
-  loadedBudgetId = null;
-  
-  // NUCLEAR OPTION: Completely wipe the data directory to remove corrupt state/locks
-  try {
-    if (fs.existsSync(ACTUAL_DATA_DIR)) {
-      fs.rmSync(ACTUAL_DATA_DIR, { recursive: true, force: true });
-    }
-    fs.mkdirSync(ACTUAL_DATA_DIR, { recursive: true });
-    addLog('Local data cache wiped clean.', 'success');
-  } catch (e) {
-    console.error("Failed to clean data dir:", e);
-    addLog(`Warning: Failed to clean cache: ${e.message}`, 'error');
-  }
-};
-
-const initActualApi = async (serverUrl) => {
-  ensureDataDir();
-  if (isActualInitialized) return;
-  
-  addLog(`Initializing Actual API Engine with URL: ${serverUrl}`, 'info');
-  try {
-    // Pre-seed the server URL to prevent "localhost" defaults
-    if (serverUrl) {
-        fs.writeFileSync(path.join(ACTUAL_DATA_DIR, 'server-url'), serverUrl);
-    }
-    
-    // CRITICAL FIX: Pass serverURL explicitly to init
-    await actual.init({ 
-      dataDir: ACTUAL_DATA_DIR,
-      serverURL: serverUrl 
+        child.on('exit', (code) => {
+            if (code !== 0) resolve({ success: false, message: "Process failed unexpectedly" });
+            else resolve({ success: true });
+        });
     });
-    
-    isActualInitialized = true;
-  } catch (e) {
-    addLog(`Failed to init Actual API: ${e.message}`, 'error');
-    try { await actual.shutdown(); } catch(err) {}
-    isActualInitialized = false;
-    throw e;
-  }
 };
 
-const getInvestecToken = async (clientId, secretId, apiKey) => {
-  const authString = `${clientId}:${secretId}`;
-  const base64Auth = Buffer.from(authString).toString('base64');
-  const baseUrl = process.env.INVESTEC_BASE_URL || "https://openapi.investec.com";
-  
-  const response = await fetch(`${baseUrl}/identity/v2/oauth2/token`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Basic ${base64Auth}`,
-      'x-api-key': apiKey,
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: new URLSearchParams({ 'grant_type': 'client_credentials' }),
-  });
+// --- ROUTES ---
+app.use(cors());
+app.use(bodyParser.json());
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Investec Auth failed (${response.status}): ${text}`);
-  }
-  const data = await response.json();
-  return data.access_token;
-};
+app.get('/api/status', (req, res) => res.json({ 
+    isProcessing, 
+    lastSyncTime, 
+    version: SCRIPT_VERSION,
+    budgetLoaded: !!loadConfig().actualBudgetId 
+}));
+app.get('/api/logs', (req, res) => res.json(logs));
+app.get('/api/config', (req, res) => res.json(loadConfig()));
+app.post('/api/config', (req, res) => { saveConfig(req.body); res.json({ status: 'ok' }); });
 
-const getInvestecAccounts = async (token) => {
-  const baseUrl = process.env.INVESTEC_BASE_URL || "https://openapi.investec.com";
-  const response = await fetch(`${baseUrl}/za/pb/v1/accounts`, {
-    headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
-  });
-  if (!response.ok) throw new Error(`Get Accounts failed: ${await response.text()}`);
-  const data = await response.json();
-  if (!data?.data?.accounts) throw new Error("Invalid account data received from Investec");
-  return data.data.accounts; 
-};
+app.post('/api/test/investec', async (req, res) => {
+    const result = await spawnWorker('test-investec', req.body);
+    res.json(result);
+});
 
-const getTransactions = async (token, accountId, fromDate, toDate) => {
-  const baseUrl = process.env.INVESTEC_BASE_URL || "https://openapi.investec.com";
-  const url = `${baseUrl}/za/pb/v1/accounts/${accountId}/transactions?fromDate=${fromDate}&toDate=${toDate}`;
-  const response = await fetch(url, {
-    headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
-  });
-  if (!response.ok) throw new Error(`Get Transactions failed: ${await response.text()}`);
-  const data = await response.json();
-  return (data?.data?.transactions || []).map(t => ({ ...t, accountId }));
-};
-
-const transformTransaction = (t) => {
-  let amount = Math.round(t.amount * 100); 
-  if (t.type === 'DEBIT') amount = -Math.abs(amount);
-  else amount = Math.abs(amount);
-  
-  const date = t.postingDate || t.transactionDate;
-  
-  const notesParts = [];
-  if (t.transactionType) notesParts.push(`Type: ${t.transactionType}`);
-  if (t.cardNumber) notesParts.push(`Ref: ${t.cardNumber}`);
-  const notes = notesParts.join(' | ');
-
-  const safeDesc = (t.description || 'Unknown').replace(/[^a-z0-9 ]/gi, '').substring(0, 50);
-  const importId = `${t.accountId}:${t.postedOrder ?? 0}:${date}:${Math.abs(amount)}:${safeDesc}`;
-
-  return {
-    date: date,
-    amount: amount, 
-    payee_name: t.description || 'Unknown Payee',
-    imported_payee: t.description || 'Unknown Payee',
-    notes: notes,
-    imported_id: importId, 
-    cleared: true,
-  };
-};
+app.post('/api/test/actual', async (req, res) => {
+    if (isProcessing) return res.json({ success: false, message: "Sync in progress" });
+    const result = await spawnWorker('test-actual', req.body);
+    res.json(result);
+});
 
 const runSync = async () => {
-  if (isProcessing) {
-    addLog("Sync ignored: Process already running.", "info");
-    return;
-  }
-  
-  const config = loadConfig();
-  if (!config.investecClientId || !config.actualServerUrl || !config.actualBudgetId) {
-    addLog('Configuration missing. Please save settings first.', 'error');
-    return;
-  }
-
-  isProcessing = true;
-  addLog(`Starting sync process...`, 'info');
-  addLog(`Config: URL=${config.actualServerUrl} | ID=${config.actualBudgetId.substring(0,4)}...`, 'info');
-
-  try {
-    // --- 0. Diagnostic Check ---
-    addLog('Running diagnostics...', 'info');
-    const diag = await getActualServerInfo(config.actualServerUrl);
-    if (!diag.online) {
-      throw new Error(`Network Check Failed. Cannot reach Actual Server at "${config.actualServerUrl}". Details: ${diag.error}`);
-    }
-    addLog(`✅ Server Online. Mode: ${diag.mode}`, 'success');
-
-    // --- 1. Setup Actual Budget ---
-    try {
-      // Force reset every single time to prevent "Could not get remote files" due to stale locks
-      await resetActualState();
-
-      await initActualApi(config.actualServerUrl);
-
-      // Check budget ID format
-      if (config.actualBudgetId !== config.actualBudgetId.trim()) {
-         throw new Error("Budget ID contains hidden spaces. Please re-enter it in Settings.");
-      }
-
-      addLog(`Downloading Budget: ${config.actualBudgetId}...`, 'info');
-      
-      await actual.downloadBudget(config.actualBudgetId, {
-        password: config.actualPassword || undefined
-      });
-      
-      loadedBudgetId = config.actualBudgetId;
-      addLog('Budget downloaded/connected successfully.', 'success');
-
-    } catch (e) {
-      addLog(`❌ Actual Budget Error: ${e.message}`, 'error');
-      console.error("Actual API Error Detail:", e);
-      
-      if (e.message.includes('Could not get remote files')) {
-        addLog('⚠️ CRITICAL FAILURE: Server rejected the download request.', 'error');
-        addLog('1. Verify Sync ID in Actual (Settings > Advanced > Sync ID).', 'error');
-        addLog('2. Verify Password (if set).', 'error');
-        addLog('3. Docker: Ensure host.docker.internal is working.', 'error');
-      }
-
-      throw new Error("Failed to connect/sync with Actual Budget.");
-    }
-
-    // --- 2. Fetch Investec ---
-    let investecAccounts = [];
-    let token = '';
-    try {
-      addLog('Connecting to Investec...', 'info');
-      token = await getInvestecToken(config.investecClientId, config.investecSecretId, config.investecApiKey);
-      investecAccounts = await getInvestecAccounts(token);
-      addLog(`Found ${investecAccounts.length} Investec accounts.`, 'info');
-    } catch (e) {
-      addLog(`Investec API Error: ${e.message}`, 'error');
-      throw new Error("Failed to fetch data from Investec.");
-    }
-
-    const endDate = new Date();
-    const startDate = new Date();
-    startDate.setFullYear(startDate.getFullYear() - 1);
-    const fromStr = startDate.toISOString().split('T')[0];
-    const toStr = endDate.toISOString().split('T')[0];
-
-    // --- 3. Process Accounts ---
-    const actualAccounts = await actual.getAccounts();
-    let totalImported = 0;
-    let processedAccounts = 0;
-
-    for (const invAcc of investecAccounts) {
-      const invName = invAcc.accountName;
-      const matchedActualAccount = actualAccounts.find(a => 
-        a.name.toLowerCase().trim() === invName.toLowerCase().trim() || 
-        a.name.toLowerCase().includes(invName.toLowerCase())
-      );
-
-      if (!matchedActualAccount) {
-        addLog(`Skipping "${invName}": No matching Actual account found.`, 'info');
-        continue;
-      }
-
-      try {
-        const rawTxs = await getTransactions(token, invAcc.accountId, fromStr, toStr);
-        if (rawTxs.length > 0) {
-          const actualTxs = rawTxs.map(transformTransaction);
-          
-          const BATCH_SIZE = 100;
-          let batchCount = 0;
-          
-          for (let i = 0; i < actualTxs.length; i += BATCH_SIZE) {
-             const batch = actualTxs.slice(i, i + BATCH_SIZE);
-             const result = await actual.importTransactions(matchedActualAccount.id, batch);
-             batchCount += (result?.added?.length || 0) + (result?.updated?.length || 0);
-          }
-          
-          if (batchCount > 0) {
-            addLog(`Imported ${batchCount} txs into "${matchedActualAccount.name}"`, 'info');
-            totalImported += batchCount;
-          }
-          processedAccounts++;
-        }
-      } catch (e) {
-        addLog(`Error processing "${invName}": ${e.message}`, 'error');
-      }
-    }
-
-    if (processedAccounts > 0) {
-      addLog('Pushing changes to server...', 'info');
-      await actual.sync();
-      addLog(`Sync complete. ${totalImported} new transactions.`, 'success');
-    } else {
-      addLog('Sync complete. No matches or no new data.', 'info');
-    }
+    if (isProcessing) { addLog("Sync skipped (already running)", "info"); return; }
     
-    lastSyncTime = Date.now();
+    const config = loadConfig();
+    if (!config.investecClientId || !config.actualServerUrl) {
+        addLog("Config missing", "error");
+        return;
+    }
 
-  } catch (e) {
-    addLog(`❌ Sync Aborted: ${e.message}`, 'error');
-  } finally {
-    isProcessing = false;
-    // Always clean up after a run in this aggressive mode
-    try { await actual.shutdown(); } catch(e) {}
-  }
+    isProcessing = true;
+    addLog("Starting Sync...", "info");
+    
+    try {
+        await spawnWorker('sync', config);
+        lastSyncTime = Date.now();
+    } catch (e) {
+        addLog("Sync spawn error", "error");
+    } finally {
+        isProcessing = false;
+    }
 };
 
-// --- Cron & Routes ---
+app.post('/api/sync', (req, res) => {
+    if (isProcessing) return res.status(409).json({ status: 'busy' });
+    runSync();
+    res.json({ status: 'started' });
+});
+
 const setupCron = (schedule) => {
-  if (currentTask) { currentTask.stop(); currentTask = null; }
-  if (schedule && cron.validate(schedule)) {
-    currentTask = cron.schedule(schedule, () => {
-      runSync().catch(err => console.error("Scheduled sync failed", err));
-    });
-    addLog(`Schedule set: ${schedule}`, 'info');
-  }
+    if (currentTask) { currentTask.stop(); currentTask = null; }
+    if (schedule && cron.validate(schedule)) {
+        currentTask = cron.schedule(schedule, () => runSync());
+        addLog(`Schedule updated: ${schedule}`, 'info');
+    }
 };
 
 const initialConfig = loadConfig();
 setupCron(initialConfig.syncSchedule);
 
-app.get('/api/health', (req, res) => res.json({ status: 'ok', version: SCRIPT_VERSION }));
-
-app.get('/api/status', (req, res) => res.json({ 
-  isProcessing, 
-  lastSyncTime,
-  version: SCRIPT_VERSION,
-  budgetLoaded: !!loadedBudgetId
-}));
-
-app.get('/api/config', (req, res) => res.json(loadConfig()));
-app.post('/api/config', (req, res) => { saveConfig(req.body); res.json({ status: 'ok' }); });
-
-app.post('/api/sync', (req, res) => { 
-  if (!isProcessing) {
-    runSync().catch(e => console.error("Manual sync execution error:", e));
-    res.json({ status: 'started' }); 
-  } else {
-    res.status(409).json({ status: 'already_running' });
-  }
-});
-
-app.get('/api/logs', (req, res) => res.json(logs));
-
 app.use(express.static(path.join(__dirname, 'dist')));
 app.get('*', (req, res) => {
-  const indexPath = path.join(__dirname, 'dist', 'index.html');
-  if (fs.existsSync(indexPath)) res.sendFile(indexPath);
-  else res.status(404).send("Build not found.");
+    const p = path.join(__dirname, 'dist', 'index.html');
+    if (fs.existsSync(p)) res.sendFile(p);
+    else res.send('Investec Sync Server Running (Build pending)');
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running on port ${PORT}`);
-  addLog(`System initialized. v${SCRIPT_VERSION}`, 'success');
+    console.log(`Server v${SCRIPT_VERSION} listening on ${PORT}`);
+    addLog(`System Online. v${SCRIPT_VERSION}`, 'success');
 });
+
+} // End Main Process

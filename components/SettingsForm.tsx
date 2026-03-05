@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { AppConfig } from '../types';
-import { Save, Eye, EyeOff, Clock } from 'lucide-react';
+import { Save, Eye, EyeOff, Clock, CheckCircle, AlertCircle, Loader2, HelpCircle } from 'lucide-react';
 
 interface Props {
   config: AppConfig;
@@ -10,6 +10,13 @@ interface Props {
 export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
   const [localConfig, setLocalConfig] = useState<AppConfig>(config);
   const [showSecrets, setShowSecrets] = useState(false);
+  
+  // Test States
+  const [testingInvestec, setTestingInvestec] = useState(false);
+  const [investecResult, setInvestecResult] = useState<{success: boolean, msg: string} | null>(null);
+  
+  const [testingActual, setTestingActual] = useState(false);
+  const [actualResult, setActualResult] = useState<{success: boolean, msg: string} | null>(null);
 
   useEffect(() => {
     setLocalConfig(config);
@@ -18,11 +25,64 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setLocalConfig(prev => ({ ...prev, [name]: value }));
+    // Clear test results when typing
+    if (name.startsWith('investec')) setInvestecResult(null);
+    if (name.startsWith('actual')) setActualResult(null);
+  };
+
+  const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    // Auto-trim input on blur to prevent whitespace errors
+    setLocalConfig(prev => ({ ...prev, [name]: value.trim() }));
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     onSave(localConfig);
+  };
+
+  const testInvestec = async () => {
+    setTestingInvestec(true);
+    setInvestecResult(null);
+    try {
+        const res = await fetch('/api/test/investec', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                investecClientId: localConfig.investecClientId,
+                investecSecretId: localConfig.investecSecretId,
+                investecApiKey: localConfig.investecApiKey
+            })
+        });
+        const data = await res.json();
+        setInvestecResult({ success: data.success, msg: data.message });
+    } catch (e) {
+        setInvestecResult({ success: false, msg: "Network Error" });
+    } finally {
+        setTestingInvestec(false);
+    }
+  };
+
+  const testActual = async () => {
+    setTestingActual(true);
+    setActualResult(null);
+    try {
+        const res = await fetch('/api/test/actual', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                actualServerUrl: localConfig.actualServerUrl,
+                actualBudgetId: localConfig.actualBudgetId,
+                actualPassword: localConfig.actualPassword
+            })
+        });
+        const data = await res.json();
+        setActualResult({ success: data.success, msg: data.message });
+    } catch (e) {
+        setActualResult({ success: false, msg: "Network Error" });
+    } finally {
+        setTestingActual(false);
+    }
   };
 
   return (
@@ -39,8 +99,28 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
       </div>
 
       <div className="space-y-4">
+        {/* INVESTEC SECTION */}
         <div className="p-3 bg-slate-800/50 rounded-md border border-slate-700/50 mb-4">
-          <h3 className="text-investec-500 font-bold text-sm uppercase tracking-wider mb-2">Investec Credentials</h3>
+          <div className="flex justify-between items-center mb-2">
+            <h3 className="text-investec-500 font-bold text-sm uppercase tracking-wider">Investec Credentials</h3>
+            <button 
+                type="button" 
+                onClick={testInvestec} 
+                disabled={testingInvestec || !localConfig.investecClientId}
+                className="text-xs bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-white flex items-center gap-1 disabled:opacity-50"
+            >
+                {testingInvestec && <Loader2 size={10} className="animate-spin"/>}
+                Test Investec
+            </button>
+          </div>
+          
+          {investecResult && (
+             <div className={`text-xs p-2 rounded mb-2 flex items-start gap-2 ${investecResult.success ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}`}>
+                {investecResult.success ? <CheckCircle size={14} className="mt-0.5"/> : <AlertCircle size={14} className="mt-0.5"/>}
+                {investecResult.msg}
+             </div>
+          )}
+
           <div className="grid grid-cols-1 gap-4">
             <div>
               <label className="block text-xs text-slate-400 mb-1">Client ID</label>
@@ -48,6 +128,7 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
                 name="investecClientId"
                 value={localConfig.investecClientId || ''}
                 onChange={handleChange}
+                onBlur={handleBlur}
                 type="text"
                 className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-investec-500 outline-none text-slate-200"
                 placeholder="Client ID"
@@ -59,6 +140,7 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
                 name="investecSecretId"
                 value={localConfig.investecSecretId || ''}
                 onChange={handleChange}
+                onBlur={handleBlur}
                 type={showSecrets ? "text" : "password"}
                 className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-investec-500 outline-none text-slate-200"
                 placeholder="Secret"
@@ -70,6 +152,7 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
                 name="investecApiKey"
                 value={localConfig.investecApiKey || ''}
                 onChange={handleChange}
+                onBlur={handleBlur}
                 type={showSecrets ? "text" : "password"}
                 className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-investec-500 outline-none text-slate-200"
                 placeholder="API Key"
@@ -78,8 +161,43 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
           </div>
         </div>
 
+        {/* ACTUAL SECTION */}
         <div className="p-3 bg-slate-800/50 rounded-md border border-slate-700/50">
-          <h3 className="text-actual-500 font-bold text-sm uppercase tracking-wider mb-2">Actual Budget Settings</h3>
+          <div className="flex justify-between items-center mb-2">
+            <h3 className="text-actual-500 font-bold text-sm uppercase tracking-wider">Actual Budget Settings</h3>
+             <button 
+                type="button" 
+                onClick={testActual} 
+                disabled={testingActual || !localConfig.actualServerUrl}
+                className="text-xs bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-white flex items-center gap-1 disabled:opacity-50"
+            >
+                {testingActual && <Loader2 size={10} className="animate-spin"/>}
+                Test Connection
+            </button>
+          </div>
+
+          {actualResult && (
+             <div className={`text-xs p-2 rounded mb-2 flex items-start gap-2 ${actualResult.success ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}`}>
+                {actualResult.success ? <CheckCircle size={14} className="mt-0.5"/> : <AlertCircle size={14} className="mt-0.5"/>}
+                {actualResult.msg}
+             </div>
+          )}
+
+           {/* ERROR HELP */}
+           {!actualResult?.success && actualResult?.msg.includes("SERVER ERROR") && (
+            <div className="bg-orange-950/40 border border-orange-800 p-3 rounded mb-4 text-xs">
+                <p className="font-bold text-orange-400 mb-1">Troubleshoot Connection</p>
+                <p className="text-slate-300 mb-2">
+                    If the ID is definitely correct, the file might not be on the server yet.
+                </p>
+                <ol className="list-decimal pl-4 space-y-1 text-slate-400">
+                    <li>Go to Actual &gt; File Menu &gt; Close File.</li>
+                    <li>Verify the file says "Remote". If it says "Local", you must upload it.</li>
+                    <li>If "Upload" isn't available: Open &gt; Export (Zip) &gt; Close &gt; Import (Actual).</li>
+                </ol>
+            </div>
+           )}
+
           <div className="grid grid-cols-1 gap-4">
              <div>
               <label className="block text-xs text-slate-400 mb-1">Server URL</label>
@@ -87,40 +205,48 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
                 name="actualServerUrl"
                 value={localConfig.actualServerUrl || ''}
                 onChange={handleChange}
+                onBlur={handleBlur}
                 type="text"
                 className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-actual-500 outline-none text-slate-200"
-                placeholder="http://host.docker.internal:5006"
+                placeholder="http://127.0.0.1:5006"
               />
               <p className="text-[10px] text-slate-500 mt-1">
-                <span className="text-yellow-500">Docker Note:</span> Use <code className="bg-slate-800 px-1 rounded text-slate-300">http://host.docker.internal:5006</code> to access host services.
+                <span className="text-yellow-500">Host Mode Active:</span> Use <code className="bg-slate-800 px-1 rounded text-slate-300">http://127.0.0.1:5006</code> or your local IP.
               </p>
             </div>
              <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Budget ID (Sync ID)</label>
+                  <label className="block text-xs text-slate-400 mb-1">Sync ID</label>
                   <input
                     name="actualBudgetId"
                     value={localConfig.actualBudgetId || ''}
                     onChange={handleChange}
+                    onBlur={handleBlur}
                     type="text"
                     className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-actual-500 outline-none text-slate-200"
-                    placeholder="uuid"
+                    placeholder="uuid (Settings > Advanced)"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Password (Optional)</label>
+                  <label className="block text-xs text-slate-400 mb-1 font-semibold">Server Password</label>
                   <input
                     name="actualPassword"
                     value={localConfig.actualPassword || ''}
                     onChange={handleChange}
+                    onBlur={handleBlur}
                     type="password"
-                    className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-actual-500 outline-none text-slate-200"
+                    className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-slate-500 outline-none text-slate-200"
+                    placeholder="Password"
                   />
                 </div>
+             </div>
+             <div className="text-[10px] text-slate-500 bg-slate-950/50 p-2 rounded border border-slate-800">
+                <span className="font-bold text-slate-400">NOTE:</span> If your file uses End-to-End Encryption, this password field is also used for that.
              </div>
           </div>
         </div>
 
+        {/* AUTOMATION */}
         <div className="p-3 bg-slate-800/50 rounded-md border border-slate-700/50">
           <h3 className="text-slate-400 font-bold text-sm uppercase tracking-wider mb-2 flex items-center gap-2">
             <Clock size={14} /> Automation
@@ -131,6 +257,7 @@ export const SettingsForm: React.FC<Props> = ({ config, onSave }) => {
               name="syncSchedule"
               value={localConfig.syncSchedule || ''}
               onChange={handleChange}
+              onBlur={handleBlur}
               type="text"
               className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-slate-500 outline-none text-slate-200 font-mono"
               placeholder="0 0 * * *"
