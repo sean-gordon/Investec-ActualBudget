@@ -1,7 +1,18 @@
-Copyright 2025 Sean Gordon
+Copyright © 2025 Sean Gordon. All Rights Reserved.
+This license governs the use of the software known as "Investec-ActualBudget" (the "Software"), including all associated source code, compiled binaries, documentation, and intellectual property. The Software is the exclusive proprietary property of Sean Gordon (the "Licensor").
+1. Grant of License
+The Licensor grants you (the "Licensee") a limited, non-exclusive, non-transferable, revocable license to use the Software solely for personal, non-commercial purposes only.
+2. Term and Termination
+This License is perpetual unless terminated. The Licensor may terminate this License immediately without notice if the Licensee breaches any term or condition of this License. Upon termination, the Licensee must immediately cease all use of the Software and destroy all copies, whether in source or compiled form.
+3. Strict Prohibitions (Restrictions)
+The Licensee is strictly prohibited from doing any of the following:
+• Distribution: Sharing, selling, renting, leasing, lending, sublicensing, or otherwise distributing, transferring, or making the Software or any part thereof available to any third party.
+• Modification: Creating derivative works, adapting, translating, modifying, enhancing, or altering the Software in any way.
+• Commercial Use: Using the Software for any commercial purpose, including but not limited to, generating revenue, performing services for a fee, or using it within a business operation.
+• Reverse Engineering: Decompiling, disassembling, or otherwise attempting to discover the source code, structure, or algorithms of the Software.
+• Tampering with Notices: Removing, altering, or obscuring any copyright, trademark, patent, or other proprietary notices from the Software.
+• Harmful Use: Using the Software in a manner that is illegal, harmful, or violates any third-party rights.
+4. No Warranty and Limitation of Liability
+THE SOFTWARE IS PROVIDED "AS IS," WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE LICENSOR (SEAN GORDON) BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. The Licensee assumes all risk arising out of the use or performance of the Software.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
