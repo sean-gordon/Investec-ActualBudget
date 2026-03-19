@@ -1,3 +1,27 @@
+# Release v7.0.0 - Security Hardening
+
+## 🚀 Key Highlights
+
+This major release focuses on **Security Hardening** and **Infrastructure Protection**. It introduces essential authentication layers and resolves several critical vulnerabilities to ensure your financial data and secrets remain private and secure.
+
+### ✨ New Features & Security Improvements
+
+*   🔐 **Integrated Authentication System**:
+    *   **Master Password Protection**: Access to the Sync Manager dashboard and API now requires a Master Password.
+    *   **Secure Session Management**: All API communication is now authenticated via unique session tokens.
+*   🛡️ **Enhanced Data Protection**:
+    *   **Sensitive Data Masking**: All secrets (Investec Client IDs, Secrets, API Keys, and Actual passwords) are now masked in the UI and via the API, preventing accidental disclosure.
+    *   **Mask-Aware Configuration**: The server intelligently handles masked data during configuration updates to preserve your real secrets while keeping them hidden from the UI.
+*   🌐 **Network & Infrastructure Security**:
+    *   **Strict TLS Verification**: Re-enabled standard SSL/TLS certificate verification for all outbound connections, protecting against Man-in-the-Middle (MitM) attacks.
+    *   **Production Security Headers**: Integrated robust security headers in the Nginx configuration, including `Content-Security-Policy (CSP)`, `HSTS`, and `X-Frame-Options`.
+    *   **Non-Root Execution**: The application processes inside the Docker container now run as a low-privilege `node` user instead of `root`, providing better isolation from the host system.
+*   🛠️ **Dependency Audit & Patching**:
+    *   **Clean Security Audit**: Updated core dependencies including `express` and `body-parser` to resolve known vulnerabilities (CVE-2024-45590).
+    *   **Resolved Nested Issues**: Handled vulnerabilities in transitive dependencies (`qs`, `rollup`) to ensure a 0-vulnerability dependency tree.
+
+---
+
 # Release v6.5.0 - Stable
 
 ## 🚀 Key Highlights
