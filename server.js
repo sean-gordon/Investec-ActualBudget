@@ -48,8 +48,13 @@ const ACTUAL_DATA_DIR = path.join(DATA_DIR, 'actual-data');
 const UPDATE_LOG = path.join(DATA_DIR, 'update.log');
 const SCRIPT_VERSION = "6.5.0 - Stable";
 
-// Disable Self-Signed Cert Rejection
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+// --- SECURITY CONFIG ---
+const MASTER_PASSWORD = process.env.APP_PASSWORD || 'investec-sync-default'; // Default for local use, should be changed
+const SESSION_SECRET = process.env.SESSION_SECRET || 'actual-sync-secret-' + uuidv4();
+
+// TLS Verification should be ENABLED by default.
+// If using self-signed certs, the CA should be added to the system/docker trust store.
+// process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"; // REMOVED FOR SECURITY
 
 const logToFile = (msg) => {
     const timestamp = new Date().toISOString();
@@ -613,6 +618,35 @@ const spawnWorker = (action, payload) => {
 app.use(cors());
 app.use(bodyParser.json());
 
+// --- AUTH MIDDLEWARE ---
+const authenticate = (req, res, next) => {
+    // Allow access to status if not sensitive, but for now let's protect everything /api
+    const authHeader = req.headers['authorization'];
+    const sessionToken = req.headers['x-session-token']; // Simple token-based auth
+    
+    // For simplicity in this local-first app, we'll allow a simple 'Password' header 
+    // or use the MASTER_PASSWORD as a bearer token.
+    if (authHeader === `Bearer ${MASTER_PASSWORD}` || sessionToken === MASTER_PASSWORD) {
+        return next();
+    }
+
+    // In a real app, we'd use JWT or sessions. This is a step up from no auth.
+    res.status(401).json({ error: 'Unauthorized. Please provide valid credentials.' });
+};
+
+// Public Routes (if any)
+app.post('/api/login', (req, res) => {
+    const { password } = req.body;
+    if (password === MASTER_PASSWORD) {
+        res.json({ token: MASTER_PASSWORD }); // Returning the password as token is poor practice, but better than nothing for now
+    } else {
+        res.status(401).json({ error: 'Invalid password' });
+    }
+});
+
+// Protect all other /api routes
+app.use('/api', authenticate);
+
 app.get('/api/status', (req, res) => {
     const config = loadConfig();
     res.json({
@@ -624,8 +658,42 @@ app.get('/api/status', (req, res) => {
 });
 
 app.get('/api/logs', (req, res) => res.json(logs));
-app.get('/api/config', (req, res) => res.json(loadConfig()));
-app.post('/api/config', (req, res) => { saveConfig(req.body); res.json({ status: 'ok' }); });
+app.get('/api/config', (req, res) => {
+    const config = loadConfig();
+    // SANITIZE: Mask sensitive fields
+    const sanitized = {
+        ...config,
+        profiles: (config.profiles || []).map(p => ({
+            ...p,
+            investecSecretId: p.investecSecretId ? '********' : '',
+            investecApiKey: p.investecApiKey ? '********' : '',
+            actualPassword: p.actualPassword ? '********' : ''
+        }))
+    };
+    res.json(sanitized);
+});
+app.post('/api/config', (req, res) => { 
+    // When saving, we need to handle the masked fields so we don't overwrite with '********'
+    const newConfig = req.body;
+    const oldConfig = loadConfig();
+    
+    if (newConfig.profiles && oldConfig.profiles) {
+        newConfig.profiles = newConfig.profiles.map(newP => {
+            const oldP = oldConfig.profiles.find(p => p.id === newP.id);
+            if (!oldP) return newP;
+            
+            return {
+                ...newP,
+                investecSecretId: newP.investecSecretId === '********' ? oldP.investecSecretId : newP.investecSecretId,
+                investecApiKey: newP.investecApiKey === '********' ? oldP.investecApiKey : newP.investecApiKey,
+                actualPassword: newP.actualPassword === '********' ? oldP.actualPassword : newP.actualPassword
+            };
+        });
+    }
+    
+    saveConfig(newConfig); 
+    res.json({ status: 'ok' }); 
+});
 
 // Category Endpoints
 app.get('/api/categories', (req, res) => res.json(loadCategories()));
@@ -807,9 +875,12 @@ app.post('/api/git/switch', (req, res) => {
     res.json({ status: 'updating', message: `Switching to ${branch}. Service will restart.` });
     
     setTimeout(() => {
-        // Use -B to force reset/create branch from origin, avoiding ambiguity with files
-        const cmd = `git fetch origin && git checkout -B ${branch} origin/${branch} && git pull origin ${branch} && ${hostDirEnv.HOST_DIR ? 'HOST_DIR="$HOST_DIR" ' : ''}docker compose up -d --build`;
-        exec(cmd, { cwd: __dirname, env: { ...process.env, ...hostDirEnv } }, (error, stdout, stderr) => {
+        // More robust command construction
+        const gitCmd = `git fetch origin && git checkout -B ${branch} origin/${branch} && git pull origin ${branch}`;
+        const composeCmd = `${hostDirEnv.HOST_DIR ? 'HOST_DIR="' + hostDirEnv.HOST_DIR + '" ' : ''}docker compose up -d --build`;
+        const fullCmd = `${gitCmd} && ${composeCmd}`;
+        
+        exec(fullCmd, { cwd: __dirname, env: { ...process.env, ...hostDirEnv } }, (error, stdout, stderr) => {
             if (error) {
                 console.error(`Switch error: ${error}`);
                 addLog(`Branch switch failed: ${error.message}`, 'error');

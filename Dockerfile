@@ -49,11 +49,14 @@ COPY --from=builder /app/dist /app-dist
 # Copy server script
 COPY server.js .
 
-# Create data directory for volume
-RUN mkdir -p data
+# Create data directory and adjust permissions for the node user
+RUN mkdir -p data && chown -R node:node /app /app-dist
 
 # Expose the application port
 EXPOSE 46490
+
+# Switch to non-root user
+USER node
 
 # Start the backend server
 # We copy assets from the safe /app-dist location to the mounted /app/dist folder at runtime

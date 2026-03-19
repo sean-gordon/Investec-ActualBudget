@@ -28,9 +28,21 @@ export default function App() {
   const [updateInfo, setUpdateInfo] = useState<{ available: boolean; latest: string } | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
 
-  const fetchJson = async (url: string, options?: RequestInit) => {
+  const [sessionToken, setSessionToken] = useState<string | null>(localStorage.getItem('sync_token'));
+
+  const fetchJson = async (url: string, options: RequestInit = {}) => {
+    const headers = {
+      ...(options.headers || {}),
+      'x-session-token': sessionToken || ''
+    };
+
     try {
-      const res = await fetch(url, options);
+      const res = await fetch(url, { ...options, headers });
+      if (res.status === 401 && !url.includes('/login')) {
+        setSessionToken(null);
+        localStorage.removeItem('sync_token');
+        throw new Error('Unauthorized');
+      }
       if (!res.ok) {
         const text = await res.text().catch(() => 'No error details');
         throw new Error(`API Error ${res.status}: ${text.substring(0, 100)}`);
@@ -39,9 +51,28 @@ export default function App() {
       if (contentType && contentType.includes('application/json')) {
         return await res.json();
       }
-      throw new Error(`Invalid response type: ${contentType}`);
+      return null;
     } catch (error) {
       throw error;
+    }
+  };
+
+  const handleLogin = async (password: string) => {
+    try {
+        const data = await fetchJson(`${API_BASE}/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password })
+        });
+        if (data?.token) {
+            setSessionToken(data.token);
+            localStorage.setItem('sync_token', data.token);
+            return true;
+        }
+        return false;
+    } catch (e) {
+        alert("Login failed: " + (e as Error).message);
+        return false;
     }
   };
 
@@ -89,8 +120,11 @@ export default function App() {
 
   // Initial Load & Version Check
   useEffect(() => {
+    if (!sessionToken) return;
+    
     fetchJson(`${API_BASE}/config`)
       .then(data => {
+        if (!data) return;
         setConfig(data);
         // Default to first enabled profile
         if (data.profiles && data.profiles.length > 0) {
@@ -102,31 +136,37 @@ export default function App() {
 
     fetchJson(`${API_BASE}/version-check`)
       .then(data => {
-        if (data.updateAvailable) {
+        if (data?.updateAvailable) {
           setUpdateInfo({ available: true, latest: data.latest });
         }
       })
       .catch(console.error);
-  }, []);
+  }, [sessionToken]);
 
   // System Polling (Status + System Logs)
   useEffect(() => {
+    if (!sessionToken) return;
+
     const poll = async () => {
       try {
         const statusData = await fetchJson(`${API_BASE}/status`);
+        if (!statusData) return;
         setIsConnected(true);
         setProcessingProfiles(statusData.processingProfiles || []);
         setServerVersion(statusData.version);
 
         if (logViewMode === 'live') {
             const logsData = await fetchJson(`${API_BASE}/logs`);
+            if (!logsData) return;
             // Tag system logs
             const taggedLogs = logsData.map((l: LogEntry) => ({ ...l, source: 'System' }));
             setSystemLogs(taggedLogs);
         }
 
       } catch (e) {
-        setIsConnected(false);
+        if ((e as Error).message !== 'Unauthorized') {
+            setIsConnected(false);
+        }
       }
     };
     poll();
@@ -141,7 +181,7 @@ export default function App() {
 
   // AI Logs Polling (Based on Active Profile)
   useEffect(() => {
-    if (!activeProfileId || logViewMode !== 'live') {
+    if (!sessionToken || !activeProfileId || logViewMode !== 'live') {
         if (logViewMode !== 'live') setRawAiLogs(''); // Clear if not looking at live
         return;
     }
@@ -155,7 +195,7 @@ export default function App() {
 
         try {
             const res = await fetchJson(`${API_BASE}/docker/logs?container=${profile.actualAiContainer}`);
-            setRawAiLogs(res.logs || '');
+            if (res) setRawAiLogs(res.logs || '');
         } catch (e) {
             console.error("Failed to fetch AI logs", e);
         }
@@ -303,6 +343,45 @@ export default function App() {
   };
 
   const activeProfileName = config.profiles.find(p => p.id === activeProfileId)?.name || 'System';
+
+  if (!sessionToken) {
+    return (
+        <div className="flex items-center justify-center h-screen bg-slate-950 text-slate-200 p-8">
+            <div className="max-w-md w-full bg-slate-900 p-8 rounded-2xl border border-slate-800 shadow-2xl">
+                <div className="flex flex-col items-center gap-4 mb-8">
+                    <div className="bg-investec-900 p-4 rounded-2xl border border-slate-700">
+                        <Activity className="text-investec-500" size={32} />
+                    </div>
+                    <h1 className="text-2xl font-bold text-white">Investec / Actual Sync</h1>
+                    <p className="text-sm text-slate-500 text-center">Enter your master password to access the sync manager.</p>
+                </div>
+                <form 
+                    onSubmit={async (e) => {
+                        e.preventDefault();
+                        const pass = (e.currentTarget.elements.namedItem('password') as HTMLInputElement).value;
+                        const ok = await handleLogin(pass);
+                        if (!ok) alert("Invalid Password");
+                    }}
+                    className="space-y-4"
+                >
+                    <input 
+                        name="password"
+                        type="password" 
+                        placeholder="Master Password"
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 focus:ring-2 focus:ring-investec-500 outline-none transition-all"
+                        autoFocus
+                    />
+                    <button 
+                        type="submit"
+                        className="w-full bg-investec-500 hover:bg-yellow-400 text-black font-bold py-3 rounded-xl transition-all shadow-lg shadow-yellow-900/10"
+                    >
+                        Login
+                    </button>
+                </form>
+            </div>
+        </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-slate-950 text-slate-200">
