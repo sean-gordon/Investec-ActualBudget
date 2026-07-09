@@ -174,6 +174,7 @@ check(dockerfile.includes('git config --system --add safe.directory /host-projec
 check(dockerignore.includes('node_modules') && dockerignore.includes('data') && dockerignore.includes('.git'), '.dockerignore should exclude generated, local data, and Git metadata from Docker build contexts');
 
 const dockerCompose = read('docker-compose.yml');
+check(dockerCompose.includes('name: investec-actualbudget'), 'docker-compose.yml should use a stable project name when run from /host-project or the host checkout');
 check(dockerCompose.includes('ports:') && dockerCompose.includes('"46490:46490"'), 'docker-compose.yml should publish the web app port');
 check(dockerCompose.includes('host.docker.internal:host-gateway'), 'docker-compose.yml should support reaching host services from Linux containers');
 check(dockerCompose.includes('./data:/app/data'), 'docker-compose.yml should persist app data');
