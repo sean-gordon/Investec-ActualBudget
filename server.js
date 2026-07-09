@@ -41,16 +41,29 @@ if (dns.setDefaultResultOrder) {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PORT = process.env.PORT || 46490;
-const DATA_DIR = path.join(__dirname, 'data');
+const HOST = process.env.HOST || '0.0.0.0';
+const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, 'data');
 const CONFIG_FILE = path.join(DATA_DIR, 'settings.json');
 const CATEGORIES_FILE = path.join(DATA_DIR, 'categories.json');
 const ACTUAL_DATA_DIR = path.join(DATA_DIR, 'actual-data');
 const UPDATE_LOG = path.join(DATA_DIR, 'update.log');
-const SCRIPT_VERSION = "6.5.0 - Stable";
+const DIST_DIR = process.env.DIST_DIR ? path.resolve(process.env.DIST_DIR) : path.join(__dirname, 'dist');
+const PROJECT_ROOT = process.env.PROJECT_ROOT ? path.resolve(process.env.PROJECT_ROOT) : __dirname;
+const PACKAGE_FILE = path.join(__dirname, 'package.json');
+const MAINTENANCE_ACTIONS_DISABLED = process.env.DISABLE_MAINTENANCE_ACTIONS === 'true';
+const VERSION_CHECK_TIMEOUT_MS = Number(process.env.VERSION_CHECK_TIMEOUT_MS || 10000);
+const VERSION_CHECK_URL = process.env.VERSION_CHECK_URL || 'https://raw.githubusercontent.com/sean-gordon/Investec-ActualBudget/main/package.json';
+const SCRIPT_VERSION = (() => {
+    try {
+        const pkg = JSON.parse(fs.readFileSync(PACKAGE_FILE, 'utf-8'));
+        return pkg.version || 'unknown';
+    } catch (e) {
+        return 'unknown';
+    }
+})();
 
 // --- SECURITY CONFIG ---
 const MASTER_PASSWORD = process.env.APP_PASSWORD || 'investec-sync-default'; // Default for local use, should be changed
-const SESSION_SECRET = process.env.SESSION_SECRET || 'actual-sync-secret-' + uuidv4();
 
 // TLS Verification should be ENABLED by default.
 // If using self-signed certs, the CA should be added to the system/docker trust store.
@@ -168,6 +181,7 @@ if (process.env.WORKER_ACTION) {
     const logP = (msg, type = 'info') => log(`[${profileName}] ${msg}`, type);
 
     (async () => {
+        let workerExitCode = 0;
         try {
             logP(`Worker started: ${action}`, 'info');
 
@@ -475,10 +489,10 @@ if (process.env.WORKER_ACTION) {
             let msg = e.message;
             logP(`ERROR: ${msg}`, 'error');
             if (process.send) process.send({ type: 'result', success: false, message: msg });
-            process.exit(1);
+            workerExitCode = 1;
         } finally {
             try { await actual.shutdown(); } catch(e) {}
-            process.exit(0);
+            process.exit(workerExitCode);
         }
     })();
 } else {
@@ -490,6 +504,7 @@ if (process.env.WORKER_ACTION) {
 const app = express();
 
 const processingProfiles = new Set(); // Track active profile IDs
+const activeSessions = new Set();
 let logs = [];
 const MAX_LOGS = 200;
 let cronTasks = {}; // { profileId: task }
@@ -551,6 +566,7 @@ const loadConfig = () => {
 };
 
 const setupCron = (config) => {
+    const warnings = [];
     // Stop all existing tasks
     Object.values(cronTasks).forEach(task => task.stop());
     cronTasks = {};
@@ -561,14 +577,30 @@ const setupCron = (config) => {
             const task = cron.schedule(p.syncSchedule, () => runSync(p.id));
             cronTasks[p.id] = task;
             addLog(`Schedule set for "${p.name}": ${p.syncSchedule}`, 'info');
+        } else if (p.enabled && p.syncSchedule) {
+            const warning = `Invalid cron schedule for "${p.name}": ${p.syncSchedule}`;
+            warnings.push(warning);
+            addLog(warning, 'error');
         }
     });
+
+    return warnings;
+};
+
+const fetchWithTimeout = async (url, options = {}, timeoutMs = VERSION_CHECK_TIMEOUT_MS) => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        return await fetch(url, { ...options, signal: controller.signal });
+    } finally {
+        clearTimeout(timeout);
+    }
 };
 
 const saveConfig = (cfg) => {
     ensureDataDir();
     fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2));
-    setupCron(cfg);
+    return setupCron(cfg);
 };
 
 // --- CATEGORY MANAGEMENT ---
@@ -584,6 +616,87 @@ const loadCategories = () => {
 const saveCategories = (cats) => {
     ensureDataDir();
     fs.writeFileSync(CATEGORIES_FILE, JSON.stringify(cats, null, 2));
+};
+
+const isValidCategoryTree = (cats) => {
+    return cats &&
+        typeof cats === 'object' &&
+        !Array.isArray(cats) &&
+        Object.entries(cats).every(([group, categories]) => (
+            typeof group === 'string' &&
+            group.trim().length > 0 &&
+            Array.isArray(categories) &&
+            categories.every(category => typeof category === 'string' && category.trim().length > 0)
+        ));
+};
+
+const validateHostProjectRoot = (value) => {
+    if (value === undefined || value === null || value === '') {
+        return { value: '', error: null };
+    }
+    if (typeof value !== 'string') {
+        return { value: '', error: 'Host Project Path must be text.' };
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed) return { value: '', error: null };
+    if (/[\0\r\n]/.test(trimmed)) {
+        return { value: '', error: 'Host Project Path cannot contain line breaks or NUL characters.' };
+    }
+
+    return { value: trimmed, error: null };
+};
+
+const getHostDirEnv = (config) => {
+    const hostProjectRoot = validateHostProjectRoot(config?.hostProjectRoot);
+    return {
+        hostDirEnv: hostProjectRoot.value ? { HOST_DIR: hostProjectRoot.value } : {},
+        hostDirError: hostProjectRoot.error
+    };
+};
+
+const PROFILE_SECRET_FIELDS = ['investecSecretId', 'investecApiKey', 'actualPassword'];
+
+const hydrateMaskedProfileSecrets = (profile) => {
+    if (!profile || typeof profile !== 'object' || Array.isArray(profile)) return profile;
+    if (!profile.id) return profile;
+
+    const savedProfile = loadConfig().profiles.find(p => p.id === profile.id);
+    if (!savedProfile) return profile;
+
+    const hydrated = { ...profile };
+    PROFILE_SECRET_FIELDS.forEach(field => {
+        if (hydrated[field] === '********') {
+            hydrated[field] = savedProfile[field] || '';
+        }
+    });
+    return hydrated;
+};
+
+const REQUIRED_FIELDS = {
+    investec: [
+        ['investecClientId', 'Investec Client ID'],
+        ['investecSecretId', 'Investec Secret ID'],
+        ['investecApiKey', 'Investec API Key']
+    ],
+    actual: [
+        ['actualServerUrl', 'Actual Server URL'],
+        ['actualBudgetId', 'Actual Budget Sync ID']
+    ]
+};
+
+const missingProfileFields = (profile, groups) => {
+    if (!profile || typeof profile !== 'object' || Array.isArray(profile)) {
+        return ['Profile payload'];
+    }
+
+    return groups
+        .flatMap(group => REQUIRED_FIELDS[group])
+        .filter(([field]) => {
+            const value = profile[field];
+            return typeof value === 'string' ? value.trim().length === 0 : !value;
+        })
+        .map(([, label]) => label);
 };
 
 const spawnWorker = (action, payload) => {
@@ -626,7 +739,7 @@ const authenticate = (req, res, next) => {
     
     // For simplicity in this local-first app, we'll allow a simple 'Password' header 
     // or use the MASTER_PASSWORD as a bearer token.
-    if (authHeader === `Bearer ${MASTER_PASSWORD}` || sessionToken === MASTER_PASSWORD) {
+    if (authHeader === `Bearer ${MASTER_PASSWORD}` || activeSessions.has(sessionToken)) {
         return next();
     }
 
@@ -638,7 +751,9 @@ const authenticate = (req, res, next) => {
 app.post('/api/login', (req, res) => {
     const { password } = req.body;
     if (password === MASTER_PASSWORD) {
-        res.json({ token: MASTER_PASSWORD }); // Returning the password as token is poor practice, but better than nothing for now
+        const token = uuidv4();
+        activeSessions.add(token);
+        res.json({ token });
     } else {
         res.status(401).json({ error: 'Invalid password' });
     }
@@ -676,6 +791,16 @@ app.post('/api/config', (req, res) => {
     // When saving, we need to handle the masked fields so we don't overwrite with '********'
     const newConfig = req.body;
     const oldConfig = loadConfig();
+
+    if (!newConfig || !Array.isArray(newConfig.profiles)) {
+        return res.status(400).json({ error: 'Invalid config. Expected a profiles array.' });
+    }
+
+    const hostProjectRoot = validateHostProjectRoot(newConfig.hostProjectRoot);
+    if (hostProjectRoot.error) {
+        return res.status(400).json({ error: hostProjectRoot.error });
+    }
+    newConfig.hostProjectRoot = hostProjectRoot.value;
     
     if (newConfig.profiles && oldConfig.profiles) {
         newConfig.profiles = newConfig.profiles.map(newP => {
@@ -690,27 +815,45 @@ app.post('/api/config', (req, res) => {
             };
         });
     }
+
+    const invalidCategoryProfile = (newConfig.profiles || []).find(p => p.categories && !isValidCategoryTree(p.categories));
+    if (invalidCategoryProfile) {
+        return res.status(400).json({ error: `Invalid category tree for profile "${invalidCategoryProfile.name || invalidCategoryProfile.id}".` });
+    }
     
-    saveConfig(newConfig); 
-    res.json({ status: 'ok' }); 
+    const warnings = saveConfig(newConfig);
+    res.json({ status: 'ok', warnings });
 });
 
 // Category Endpoints
 app.get('/api/categories', (req, res) => res.json(loadCategories()));
 app.post('/api/categories', (req, res) => {
+    if (!isValidCategoryTree(req.body)) {
+        return res.status(400).json({ error: 'Invalid category tree. Expected an object of group names mapped to arrays of category names.' });
+    }
     saveCategories(req.body);
     res.json({ status: 'ok' });
 });
 
 app.post('/api/test/investec', async (req, res) => {
     // Requires full profile data in body, or profileId to lookup
-    const profile = req.body;
+    const profile = hydrateMaskedProfileSecrets(req.body);
+    const missing = missingProfileFields(profile, ['investec']);
+    if (missing.length) {
+        return res.status(400).json({ success: false, error: `Missing required Investec fields: ${missing.join(', ')}` });
+    }
+
     const result = await spawnWorker('test-investec', profile);
     res.json(result);
 });
 
 app.post('/api/test/actual', async (req, res) => {
-    const profile = req.body;
+    const profile = hydrateMaskedProfileSecrets(req.body);
+    const missing = missingProfileFields(profile, ['actual']);
+    if (missing.length) {
+        return res.status(400).json({ success: false, error: `Missing required Actual fields: ${missing.join(', ')}` });
+    }
+
     if (processingProfiles.has(profile.id)) return res.json({ success: false, message: "Sync in progress for this profile" });
     
     // Use temporary ID if not provided (e.g., testing before saving)
@@ -734,7 +877,7 @@ const runSync = async (profileId) => {
         return;
     }
 
-    if (!profile.enabled) {
+    if (profile.enabled === false) {
         addLog(`Cannot sync: Profile "${profile.name}" is disabled`, "error");
         return;
     }
@@ -742,8 +885,9 @@ const runSync = async (profileId) => {
     // Use profile-specific categories if available, otherwise fallback to global/default
     const categories = profile.categories || loadCategories(); 
 
-    if (!profile.investecClientId || !profile.actualServerUrl) {
-        addLog(`Config missing for ${profile.name}`, "error");
+    const missing = missingProfileFields(profile, ['investec', 'actual']);
+    if (missing.length) {
+        addLog(`Config missing for ${profile.name}: ${missing.join(', ')}`, "error");
         return;
     }
 
@@ -767,6 +911,16 @@ app.post('/api/sync', (req, res) => {
     if (!profileId) return res.status(400).json({ error: "Missing profileId" });
     
     if (processingProfiles.has(profileId)) return res.status(409).json({ status: 'busy' });
+
+    const config = loadConfig();
+    const profile = config.profiles.find(p => p.id === profileId);
+    if (!profile) return res.status(404).json({ error: `Profile ${profileId} not found` });
+    if (profile.enabled === false) return res.status(400).json({ error: `Profile "${profile.name}" is disabled` });
+
+    const missing = missingProfileFields(profile, ['investec', 'actual']);
+    if (missing.length) {
+        return res.status(400).json({ error: `Missing required sync fields for "${profile.name}": ${missing.join(', ')}` });
+    }
     
     runSync(profileId);
     res.json({ status: 'started' });
@@ -774,8 +928,17 @@ app.post('/api/sync', (req, res) => {
 
 app.get('/api/version-check', async (req, res) => {
     try {
-        const localPackage = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf-8'));
-        const remoteRes = await fetch('https://raw.githubusercontent.com/sean-gordon/Investec-ActualBudget/main/package.json');
+        const localPackage = JSON.parse(fs.readFileSync(PACKAGE_FILE, 'utf-8'));
+        if (MAINTENANCE_ACTIONS_DISABLED) {
+            return res.json({
+                current: localPackage.version,
+                latest: localPackage.version,
+                updateAvailable: false,
+                disabled: true
+            });
+        }
+
+        const remoteRes = await fetchWithTimeout(VERSION_CHECK_URL);
         
         if (!remoteRes.ok) throw new Error('Failed to fetch remote version');
         const remotePackage = await remoteRes.json();
@@ -802,6 +965,8 @@ app.get('/api/version-check', async (req, res) => {
 });
 
 app.get('/api/git/branches', async (req, res) => {
+    if (MAINTENANCE_ACTIONS_DISABLED) return res.json([]);
+
     try {
         const response = await fetch('https://api.github.com/repos/sean-gordon/Investec-ActualBudget/branches');
         if (!response.ok) throw new Error('Failed to fetch branches');
@@ -815,9 +980,13 @@ app.get('/api/git/branches', async (req, res) => {
 });
 
 app.get('/api/git/status', (req, res) => {
+    if (MAINTENANCE_ACTIONS_DISABLED) {
+        return res.json({ updateAvailable: false, branch: 'disabled' });
+    }
+
     (async () => {
         const getHash = (cmd) => new Promise(resolve => {
-            exec(cmd, { cwd: __dirname }, (err, stdout) => {
+            exec(cmd, { cwd: PROJECT_ROOT }, (err, stdout) => {
                 if (err) {
                     console.error(`Git command failed: ${cmd}`, err);
                     return resolve(null);
@@ -839,7 +1008,9 @@ app.get('/api/git/status', (req, res) => {
              }
         }
         
-        if (!branch) return res.json({ updateAvailable: false, branch: 'unknown' });
+        if (!branch || !/^[a-zA-Z0-9_\-\.\/]+$/.test(branch)) {
+            return res.json({ updateAvailable: false, branch: 'unknown' });
+        }
 
         // 2. Fetch latest info from remote (without merging)
         await getHash('git fetch origin ' + branch);
@@ -860,43 +1031,77 @@ app.get('/api/git/status', (req, res) => {
 });
 
 app.post('/api/git/switch', (req, res) => {
+    if (MAINTENANCE_ACTIONS_DISABLED) {
+        return res.status(403).json({ error: 'Maintenance actions are disabled for this server process.' });
+    }
+
     const { branch } = req.body;
     // Validate branch name to prevent command injection
-    if (!branch || !/^[a-zA-Z0-9_\-\.]+$/.test(branch)) {
+    if (!branch || !/^[a-zA-Z0-9_\-\.\/]+$/.test(branch)) {
         return res.status(400).json({ error: 'Invalid branch name' });
     }
 
     const config = loadConfig();
-    const hostDirEnv = config.hostProjectRoot && /^[a-zA-Z0-9_\-\.\/ ]+$/.test(config.hostProjectRoot) 
-        ? { HOST_DIR: config.hostProjectRoot } 
-        : {};
+    const { hostDirEnv, hostDirError } = getHostDirEnv(config);
+    if (hostDirError) {
+        return res.status(400).json({ error: hostDirError });
+    }
 
     addLog(`System switching to branch: ${branch}...`, 'info');
     res.json({ status: 'updating', message: `Switching to ${branch}. Service will restart.` });
     
-    setTimeout(() => {
-        // More robust command construction
-        const gitCmd = `git fetch origin && git checkout -B ${branch} origin/${branch} && git pull origin ${branch}`;
-        const composeCmd = `${hostDirEnv.HOST_DIR ? 'HOST_DIR="' + hostDirEnv.HOST_DIR + '" ' : ''}docker compose up -d --build`;
-        const fullCmd = `${gitCmd} && ${composeCmd}`;
-        
-        exec(fullCmd, { cwd: __dirname, env: { ...process.env, ...hostDirEnv } }, (error, stdout, stderr) => {
-            if (error) {
-                console.error(`Switch error: ${error}`);
-                addLog(`Branch switch failed: ${error.message}`, 'error');
-                return;
-            }
-            console.log(`Switch output: ${stdout}`);
+    setTimeout(async () => {
+        const runSwitchCmd = (cmd, desc) => new Promise((resolve, reject) => {
+            exec(cmd, { cwd: PROJECT_ROOT, env: { ...process.env, ...hostDirEnv } }, (error, stdout, stderr) => {
+                if (stdout) console.log(`${desc}: ${stdout.trim()}`);
+                if (stderr) console.error(`${desc}: ${stderr.trim()}`);
+                if (error) return reject(error);
+                resolve(stdout);
+            });
         });
+
+        try {
+            const currentHash = (await runSwitchCmd('git rev-parse HEAD', 'Capture Current Revision')).trim();
+            const backupBranch = `auto-switch-backup-${Date.now()}`;
+            try {
+                await runSwitchCmd(`git branch ${backupBranch} ${currentHash}`, 'Create Backup Branch Before Switch');
+            } catch (backupError) {
+                addLog(`Branch switch backup warning: ${backupError.message}`, 'error');
+            }
+
+            const localChanges = (await runSwitchCmd('git status --porcelain', 'Check Local Changes')).trim();
+            if (localChanges) {
+                await runSwitchCmd(`git stash push -u -m "auto-switch-${Date.now()}"`, 'Stash Local Changes Before Switch');
+            }
+
+            await runSwitchCmd(`git fetch origin ${branch} --tags --prune`, 'Fetch Target Branch');
+            await runSwitchCmd(`git checkout -B ${branch} origin/${branch}`, 'Checkout Target Branch From Remote');
+            await runSwitchCmd('docker compose up -d --build', 'Docker Rebuild After Branch Switch');
+            addLog(`Branch switch completed: ${branch}`, 'success');
+        } catch (error) {
+            console.error(`Switch error: ${error}`);
+            addLog(`Branch switch failed: ${error.message}`, 'error');
+        }
     }, 1000);
 });
 
 // --- DOCKER UTILS ---
+const dockerUnavailableResponse = (res, action, err, stderr = '') => {
+    const detail = (stderr || err?.message || '').trim();
+    const message = `Docker is unavailable for ${action}. Check Docker socket permissions for the running container.`;
+    console.error(`${message}${detail ? ` Details: ${detail}` : ''}`);
+    return res.status(503).json({
+        error: message,
+        details: detail
+    });
+};
+
 app.get('/api/docker/containers', (req, res) => {
-    exec('docker ps --format "{{.Names}}"', (err, stdout) => {
+    if (MAINTENANCE_ACTIONS_DISABLED) return res.json([]);
+
+    exec('docker ps --format "{{.Names}}"', (err, stdout, stderr) => {
         if (err) {
-            console.error('Docker ps error:', err);
-            return res.json([]);
+            return dockerUnavailableResponse(res, 'container discovery', err, stderr);
         }
         const containers = stdout.split('\n').map(s => s.trim()).filter(s => s.length > 0);
         res.json(containers);
@@ -909,7 +1114,13 @@ app.get('/api/docker/logs', (req, res) => {
         return res.status(400).json({ error: 'Invalid container name' });
     }
 
+    if (MAINTENANCE_ACTIONS_DISABLED) return res.json({ logs: '' });
+
     exec(`docker logs --timestamps --tail 100 ${container}`, (err, stdout, stderr) => {
+        if (err) {
+            return dockerUnavailableResponse(res, `logs for container "${container}"`, err, stderr);
+        }
+
         // Docker logs often go to stderr even if not errors (e.g. app logs)
         // We combine them or just return what we have
         const combined = (stdout || '') + (stderr || '');
@@ -926,26 +1137,27 @@ app.get('/api/debug/update-log', (req, res) => {
 });
 
 app.post('/api/update', (req, res) => {
+    if (MAINTENANCE_ACTIONS_DISABLED) {
+        return res.status(403).json({ error: 'Maintenance actions are disabled for this server process.' });
+    }
+
+    const config = loadConfig();
+    const { hostDirEnv, hostDirError } = getHostDirEnv(config);
+    if (hostDirError) {
+        return res.status(400).json({ error: hostDirError });
+    }
+
     addLog('System update initiated...', 'info');
     logToFile('=== Update Process Started ===');
     res.json({ status: 'updating', message: 'Update started. Check /api/debug/update-log for details. Service will restart shortly.' });
-    
-    const config = loadConfig();
-    const hostDirEnv = config.hostProjectRoot && /^[a-zA-Z0-9_\-\.\/ ]+$/.test(config.hostProjectRoot) 
-        ? { HOST_DIR: config.hostProjectRoot } 
-        : {};
 
-    if (!hostDirEnv.HOST_DIR && config.hostProjectRoot) {
-        const msg = `Security Warning: Invalid characters in Host Project Path. Ignoring.`;
-        addLog(msg, 'error');
-        logToFile(msg);
-    } else if (!hostDirEnv.HOST_DIR) {
+    if (!hostDirEnv.HOST_DIR) {
         logToFile("WARNING: 'Host Project Path' is not set. Docker bind mounts might fail if not running in development.");
     }
 
     const runCmd = (cmd, desc) => new Promise((resolve, reject) => {
         logToFile(`Running: ${desc} (${cmd})`);
-        exec(cmd, { cwd: __dirname, env: { ...process.env, ...hostDirEnv } }, (error, stdout, stderr) => {
+        exec(cmd, { cwd: PROJECT_ROOT, env: { ...process.env, ...hostDirEnv } }, (error, stdout, stderr) => {
             if (stdout) logToFile(`[STDOUT] ${stdout.trim()}`);
             if (stderr) logToFile(`[STDERR] ${stderr.trim()}`);
             
@@ -959,14 +1171,50 @@ app.post('/api/update', (req, res) => {
         });
     });
 
+    const runGitUpdate = async () => {
+        await runCmd('git fetch --all --tags --prune', 'Git Fetch');
+
+        const branch = (await runCmd('git rev-parse --abbrev-ref HEAD', 'Detect Current Branch')).trim();
+        if (!branch || branch === 'HEAD') {
+            throw new Error('Cannot auto-update while Git is in detached HEAD state.');
+        }
+        if (!/^[a-zA-Z0-9_\-\.\/]+$/.test(branch)) {
+            throw new Error(`Unsafe branch name detected: ${branch}`);
+        }
+
+        const remoteRef = `origin/${branch}`;
+        await runCmd(`git rev-parse --verify --quiet ${remoteRef}`, `Verify Remote Branch ${remoteRef}`);
+
+        const localChanges = (await runCmd('git status --porcelain', 'Check Local Changes')).trim();
+        if (localChanges) {
+            const stashName = `auto-update-${Date.now()}`;
+            await runCmd(`git stash push -u -m "${stashName}"`, 'Stash Local Changes Before Update');
+        }
+
+        try {
+            await runCmd(`git merge --ff-only ${remoteRef}`, 'Fast-Forward Current Branch');
+        } catch (mergeError) {
+            logToFile(`Fast-forward failed, likely due to divergent history: ${mergeError.message}`);
+            const currentHash = (await runCmd('git rev-parse HEAD', 'Capture Current Revision')).trim();
+            const backupBranch = `auto-update-backup-${Date.now()}`;
+            try {
+                await runCmd(`git branch ${backupBranch} ${currentHash}`, 'Create Backup Branch Before Reset');
+                logToFile(`Created backup branch ${backupBranch} at ${currentHash}.`);
+            } catch (backupError) {
+                logToFile(`WARNING: Could not create backup branch before reset: ${backupError.message}`);
+            }
+            await runCmd(`git reset --hard ${remoteRef}`, 'Reset Divergent Branch To Remote');
+        }
+    };
+
     // Run update in background
     setTimeout(async () => {
         try {
             // 1. Check Docker Compose availability
             await runCmd('docker compose version', 'Check Docker Compose');
 
-            // 2. Git Pull
-            await runCmd(`git fetch --all && git pull`, 'Git Pull');
+            // 2. Git Update
+            await runGitUpdate();
 
             // 3. Update Container (Build + Up + Force Recreate + Remove Orphans)
             // This single command is safer and more robust than splitting them.
@@ -994,27 +1242,42 @@ app.post('/api/update', (req, res) => {
 const initialConfig = loadConfig();
 setupCron(initialConfig);
 
-app.use(express.static(path.join(__dirname, 'dist')));
+app.get('/env-config.js', (req, res) => {
+    res.type('application/javascript').send('window.__ENV__ = window.__ENV__ || {};');
+});
+
+app.use(express.static(DIST_DIR));
 app.get('*', (req, res) => {
-    const p = path.join(__dirname, 'dist', 'index.html');
+    const p = path.join(DIST_DIR, 'index.html');
     if (fs.existsSync(p)) res.sendFile(p);
     else res.send('Investec Sync Server Running (Build pending)');
 });
 
 // --- STARTUP CHECKS ---
 setTimeout(() => {
+    if (MAINTENANCE_ACTIONS_DISABLED) {
+        addLog('Startup branch check skipped: maintenance actions disabled', 'info');
+        return;
+    }
+
     // Check if we just switched branches
     const config = loadConfig();
-    exec('git rev-parse --abbrev-ref HEAD', { cwd: __dirname }, (err, stdout) => {
-        if (!err && stdout) {
-            const currentBranch = stdout.trim();
-            addLog(`System startup complete. Active Branch: ${currentBranch}`, 'success');
-        }
-    });
+    try {
+        exec('git rev-parse --abbrev-ref HEAD', { cwd: PROJECT_ROOT }, (err, stdout) => {
+            if (!err && stdout) {
+                const currentBranch = stdout.trim();
+                addLog(`System startup complete. Active Branch: ${currentBranch}`, 'success');
+            } else if (err) {
+                addLog(`Startup branch check skipped: ${err.message}`, 'error');
+            }
+        });
+    } catch (e) {
+        addLog(`Startup branch check skipped: ${e.message}`, 'error');
+    }
 }, 5000); // Wait for server to fully initialize
 
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server v${SCRIPT_VERSION} listening on ${PORT}`);
+app.listen(PORT, HOST, () => {
+    console.log(`Server v${SCRIPT_VERSION} listening on ${HOST}:${PORT}`);
     addLog(`System Online. v${SCRIPT_VERSION}`, 'success');
 });
 

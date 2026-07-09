@@ -1,5 +1,5 @@
 # Stage 1: Build the React application
-FROM node:20.19.6-trixie-slim as builder
+FROM node:20.19.6-trixie-slim AS builder
 
 # Install build tools required for better-sqlite3 (native module used by Actual API)
 RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
@@ -9,8 +9,8 @@ WORKDIR /app
 # Copy package files
 COPY package.json package-lock.json* ./
 
-# Install all dependencies (including devDependencies for building)
-RUN npm install
+# Install all dependencies exactly as locked (including devDependencies for building)
+RUN npm ci
 
 # Copy source code
 COPY . .
@@ -33,15 +33,16 @@ RUN apt-get update && apt-get install -y python3 make g++ git openssl ca-certifi
     apt-get update && apt-get install -y docker-ce-cli docker-compose-plugin && \
     rm -rf /var/lib/apt/lists/*
 
-# Fix for "dubious ownership" error when /app is mounted from host
-RUN git config --global --add safe.directory /app
+# Fix for "dubious ownership" errors when host project paths are mounted
+RUN git config --system --add safe.directory /app && \
+    git config --system --add safe.directory /host-project
 
 # Copy package files
 COPY package.json package-lock.json* ./
 
-# Install only production dependencies
+# Install only production dependencies exactly as locked
 # This recompiles better-sqlite3 for the production environment
-RUN npm install --omit=dev
+RUN npm ci --omit=dev
 
 # Copy built assets from builder stage to a safe location
 COPY --from=builder /app/dist /app-dist
@@ -55,10 +56,11 @@ RUN mkdir -p data && chown -R node:node /app /app-dist
 # Expose the application port
 EXPOSE 46490
 
+# Serve the frontend built into the image even when /app is bind-mounted at runtime
+ENV DIST_DIR=/app-dist
+
 # Switch to non-root user
 USER node
 
 # Start the backend server
-# We copy assets from the safe /app-dist location to the mounted /app/dist folder at runtime
-# This ensures the frontend works even when the root directory is mounted from the host
-CMD ["sh", "-c", "mkdir -p dist && cp -r /app-dist/* dist/ && node server.js"]
+CMD ["node", "server.js"]

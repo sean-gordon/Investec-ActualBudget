@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "test:runtime-safe": "node scripts/test-runtime-safe.mjs",
+    "test:static": "node scripts/verify-static.mjs",
     "start": "node server.js",
     "preview": "vite preview"
   },

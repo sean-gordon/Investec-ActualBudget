@@ -35,7 +35,7 @@ Code security is actively monitored by **Snyk** to ensure dependencies and conta
 *   **Category Synchronisation**: Define your master category list in the Settings UI. The system ensures these groups and categories exist in your budget.
 *   **Smart Deduplication**: Prevents duplicate transactions even if run multiple times a day.
 *   **Transactions Only**: This tool merges transactions into your existing budget; it does not overwrite existing transaction data.
-*   **Robust Auto-Update System**: Easily update to the latest version directly from the dashboard with a single click. The system will automatically pull new code, rebuild the container, and replace the old one, ensuring seamless upgrades.
+*   **Robust Auto-Update System**: Easily update to the latest version directly from the dashboard with a single click. The system fetches the latest remote code, handles divergent branch history with a backup branch, rebuilds the container, and replaces the old one.
 *   **Integrated & Contextual Log Viewer**:
     *   **Unified Log Console**: Merges System logs (Investec Sync events) and Actual AI logs (from your AI container) into a single, chronologically sorted stream.
     *   **Profile-Driven Display**: Clicking any profile row in the dashboard dynamically loads logs relevant to that specific profile.
@@ -86,6 +86,10 @@ docker compose up -d --build
 
 The app will start on port **46490**.
 
+If your Actual Budget server runs on the Docker host, use `http://host.docker.internal:<port>` as the server URL from inside the container.
+
+The container runs as the non-root `node` user. Docker-backed features such as Actual AI container discovery, Docker log viewing, self-update rebuilds, and image pruning require the mounted Docker socket to be usable by that user. If socket permissions do not allow that, the app will keep running and show a Docker unavailable message for those privileged actions.
+
 ---
 
 ## Updates & Maintenance
@@ -95,13 +99,14 @@ Keeping the application up-to-date is simple.
 ### Method 1: Automatic Update (Recommended)
 1.  Open the dashboard.
 2.  If a new version is available, an **Update Available** button will appear in the top header.
-3.  Click the button. The system will pull the latest code and rebuild itself automatically.
+3.  Click the button. The system will fetch the latest code, recover from divergent branch history when needed, and rebuild itself automatically.
 
 ### Method 2: Manual Update
 Run the following commands in your terminal inside the project folder:
 
 ```bash
-git pull
+git fetch --all --tags --prune
+git merge --ff-only origin/$(git branch --show-current)
 docker compose up -d --build
 ```
 
@@ -152,7 +157,7 @@ This feature allows you to define a standard set of Category Groups and Categori
 ### 3. Git Repository Control
 *   **Host Project Path**: **(Important)** This is required for the "Update" and "Switch Branch" buttons to work.
     *   Enter the absolute path to the project folder on your server (e.g., `/home/user/Investec-ActualBudget` or `/data/Investec-ActualBudget`).
-    *   *Why?* This allows the Docker container to correctly mount your source code during self-updates.
+    *   *Why?* This lets the Docker container mount your source code at `/host-project` for self-updates while keeping the running app files isolated in the image.
     *   **Tip:** To find this path on Linux, open your terminal in the project folder and run: `pwd`
 *   **Target Branch**: Select a branch (like `main` or `Dev`) and click **Switch & Rebuild**.
 
@@ -174,7 +179,7 @@ While **Investec Sync** handles the reliable delivery of bank transactions into 
 
 ## Advanced: Docker Network Setup
 
-By default, this project uses `network_mode: "host"` for simplicity. However, if you prefer to run it on a shared internal Docker network with Actual Budget, follow these steps:
+By default, this project publishes port `46490` and provides `host.docker.internal` for reaching host-side services. If you prefer to run it on a shared internal Docker network with Actual Budget, follow these steps:
 
 ### 1. Create the Network
 Run this command to create a bridge network:
@@ -200,20 +205,25 @@ networks:
 
 ### 3. Update Investec Sync
 Modify the `docker-compose.yml` in this folder (`Investec-ActualBudget`).
-1.  **Remove** the line `network_mode: "host"`.
+1.  Keep the `ports` mapping if you still want to open the Investec Sync UI from the host.
 2.  **Add** the network configuration:
 
 ```yaml
 services:
   investec-sync:
     build: .
-    # REMOVED: network_mode: "host"
+    ports:
+      - "46490:46490"
     networks:
       - actual_network
     volumes:
       - ./data:/app/data
+      - ${HOST_DIR:-.}:/host-project
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - NODE_ENV=production
+      - PORT=46490
+      - PROJECT_ROOT=/host-project
 
 networks:
   actual_network:
@@ -239,8 +249,12 @@ This usually means your Sync ID is correct, but the file doesn't exist on the se
     *   If that option is missing: Open the file -> Settings -> Export -> Close File -> **Import File** (Choose "Actual"). This creates a fresh Remote copy.
 
 ### "Fetch Failed" / Network Errors
-*   Ensure `network_mode: "host"` is in your `docker-compose.yml` (this is default in the repo).
-*   Use `http://127.0.0.1:5006` for the Server URL.
+*   If Actual Budget runs on the Docker host, use `http://host.docker.internal:5006` for the Server URL.
+*   If Actual Budget runs on the same custom Docker network, use the Actual service name, for example `http://actual_server:5006`.
+*   From outside Docker, open this app at `http://localhost:46490`.
+
+### Docker Unavailable in Settings
+The default deployment does not run the web app as root. If the Docker socket is mounted but not accessible to the `node` user, Actual AI container discovery, Docker log viewing, and in-app rebuild/update actions will report Docker as unavailable. Grant Docker socket access only if you accept that it gives the app broad control over the Docker host.
 
 ### Accounts Merging Incorrectly
 The system tries to match accounts by name.

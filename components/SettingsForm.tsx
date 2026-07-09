@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Save, Eye, EyeOff, RotateCcw, GitBranch, Plus, Trash2, Copy, CheckCircle, AlertTriangle, Play } from 'lucide-react';
+import { Save, Eye, EyeOff, RotateCcw, Plus, Trash2, Copy, CheckCircle, AlertTriangle } from 'lucide-react';
 import { AppConfig, CategoryTree, SyncProfile } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 
 interface SettingsFormProps {
   config: AppConfig;
   onSave: (cfg: AppConfig) => void;
+  sessionToken?: string | null;
 }
 
 const EMPTY_PROFILE: SyncProfile = {
@@ -21,7 +22,7 @@ const EMPTY_PROFILE: SyncProfile = {
     syncSchedule: ''
 };
 
-export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) => {
+export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave, sessionToken }) => {
   const [profiles, setProfiles] = useState<SyncProfile[]>(config.profiles || []);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [hostProjectRoot, setHostProjectRoot] = useState(config.hostProjectRoot || '');
@@ -42,39 +43,76 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
   const [isSwitching, setIsSwitching] = useState(false);
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [containers, setContainers] = useState<string[]>([]);
+  const [dockerError, setDockerError] = useState<string | null>(null);
+
+  const validateCategoryTree = (value: unknown): value is CategoryTree => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    return Object.entries(value).every(([group, categories]) => (
+      group.trim().length > 0 &&
+      Array.isArray(categories) &&
+      categories.every(category => typeof category === 'string' && category.trim().length > 0)
+    ));
+  };
+
+  const withAuth = (options: RequestInit = {}): RequestInit => ({
+    ...options,
+    headers: {
+      ...(options.headers as Record<string, string> | undefined),
+      'x-session-token': sessionToken || ''
+    }
+  });
+
+  const readJson = async (res: Response) => {
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      throw new Error(data?.error || `Request failed with status ${res.status}`);
+    }
+    return data;
+  };
 
   useEffect(() => {
-    setProfiles(config.profiles || []);
+    const nextProfiles = config.profiles || [];
+    setProfiles(nextProfiles);
     setHostProjectRoot(config.hostProjectRoot || '');
-    // Select first profile by default if none selected
-    if (config.profiles && config.profiles.length > 0 && !selectedProfileId) {
-        setSelectedProfileId(config.profiles[0].id);
-    }
+    setSelectedProfileId(currentId => {
+      if (nextProfiles.length === 0) return null;
+      if (currentId && nextProfiles.some(profile => profile.id === currentId)) return currentId;
+      return nextProfiles[0].id;
+    });
   }, [config]);
 
   // Fetch default categories and containers once
   useEffect(() => {
-    fetch('/api/categories')
-      .then(res => res.json())
+    if (!sessionToken) return;
+
+    fetch('/api/categories', withAuth())
+      .then(readJson)
       .then(data => setDefaultCategories(data))
       .catch(console.error);
 
-    fetch('/api/docker/containers')
-      .then(res => res.json())
-      .then(data => setContainers(data))
-      .catch(console.error);
+    fetch('/api/docker/containers', withAuth())
+      .then(readJson)
+      .then(data => {
+        setContainers(data);
+        setDockerError(null);
+      })
+      .catch(error => {
+        setContainers([]);
+        setDockerError(error.message);
+        console.error(error);
+      });
       
     // Fetch Git Info
-    fetch('/api/git/branches')
-        .then(res => res.json())
+    fetch('/api/git/branches', withAuth())
+        .then(readJson)
         .then(data => {
             if (Array.isArray(data)) setBranches(data);
         })
         .catch(console.error);
 
     const checkGitStatus = () => {
-        fetch('/api/git/status')
-            .then(res => res.json())
+        fetch('/api/git/status', withAuth())
+            .then(readJson)
             .then(data => {
                 setCurrentBranch(data.branch);
                 setSelectedBranch(prev => prev === '' || prev === data.branch ? data.branch : prev);
@@ -86,10 +124,15 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
     checkGitStatus();
     const interval = setInterval(checkGitStatus, 5 * 60 * 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [sessionToken]);
 
   // Sync profile categories state when selection changes
   useEffect(() => {
+      if (!selectedProfileId) {
+          setProfileCategories({});
+          setJsonText('');
+          return;
+      }
       if (selectedProfileId) {
           const profile = profiles.find(p => p.id === selectedProfileId);
           if (profile) {
@@ -137,12 +180,12 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
   const runTest = async (type: 'investec' | 'actual', profile: SyncProfile) => {
       setTestStatus(prev => ({ ...prev, [type]: 'loading' }));
       try {
-          const res = await fetch(`/api/test/${type}`, {
+          const res = await fetch(`/api/test/${type}`, withAuth({
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(profile)
-          });
-          const result = await res.json();
+          }));
+          const result = await readJson(res);
           if (result.success) {
               setTestStatus(prev => ({ ...prev, [type]: 'success' }));
               alert(result.message);
@@ -152,7 +195,7 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
           }
       } catch (e: any) {
           setTestStatus(prev => ({ ...prev, [type]: 'error' }));
-          alert(`Network Error: ${e.message}`);
+          alert(`Test failed: ${e.message}`);
       } finally {
           setTimeout(() => setTestStatus(prev => ({ ...prev, [type]: 'idle' })), 3000);
       }
@@ -161,6 +204,9 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
   const handleApplyCategories = () => {
     try {
       const parsed = JSON.parse(jsonText);
+      if (!validateCategoryTree(parsed)) {
+        throw new Error('Expected an object where each group name maps to an array of category names.');
+      }
       setProfileCategories(parsed);
       handleProfileChange('categories', parsed); // Update the profile directly
       setIsEditingCats(false);
@@ -174,21 +220,22 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
     if (!selectedBranch) return;
     let msg = `Are you sure you want to switch to branch "${selectedBranch}"?\n\nThe server will rebuild and restart.`;
     if (selectedBranch === currentBranch && updateAvailable) {
-        msg = `Ready to upgrade branch "${selectedBranch}" to the latest version?\n\nThe server will pull changes and rebuild.`;
+        msg = `Ready to upgrade branch "${selectedBranch}" to the latest version?\n\nThe server will fetch the latest changes and rebuild.`;
     }
     if (!confirm(msg)) return;
     setIsSwitching(true);
     try {
-        await fetch('/api/git/switch', {
+        const res = await fetch('/api/git/switch', withAuth({
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ branch: selectedBranch })
-        });
+        }));
+        await readJson(res);
         alert('Process started. Page will reload in 15 seconds.');
         setTimeout(() => window.location.reload(), 15000);
     } catch (e) {
         setIsSwitching(false);
-        alert('Failed to trigger git operation.');
+        alert(`Failed to trigger git operation: ${(e as Error).message}`);
     }
   };
 
@@ -263,8 +310,8 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
                         className={`p-3 rounded-lg cursor-pointer border transition-all flex justify-between items-center group ${ selectedProfileId === p.id ? 'bg-investec-900 border-investec-500 text-white' : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-600'}`}
                     >
                         <div className="flex items-center gap-2 truncate">
-                             <div className={`w-2 h-2 rounded-full ${p.enabled ? 'bg-green-500' : 'bg-slate-600'}`}></div>
-                             <span className={`font-medium ${!p.enabled && 'text-slate-500 line-through'}`}>{p.name}</span>
+                             <div className={`w-2 h-2 rounded-full ${p.enabled !== false ? 'bg-green-500' : 'bg-slate-600'}`}></div>
+                             <span className={`font-medium ${p.enabled === false && 'text-slate-500 line-through'}`}>{p.name}</span>
                         </div>
                         <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button 
@@ -303,7 +350,7 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
                                 <input 
                                     type="checkbox" 
                                     className="sr-only peer"
-                                    checked={selectedProfile.enabled}
+                                    checked={selectedProfile.enabled !== false}
                                     onChange={(e) => handleProfileChange('enabled', e.target.checked)}
                                 />
                                 <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
@@ -434,6 +481,7 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave }) =>
                                 ))}
                             </select>
                             <p className="text-xs text-slate-500">Select the Docker container running Actual AI for this profile.</p>
+                            {dockerError && <p className="text-xs text-orange-400">{dockerError}</p>}
                         </div>
 
                         {/* Category Mapping */}

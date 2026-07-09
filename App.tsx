@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Activity, Settings, Play, CreditCard, ExternalLink, Wifi, Download, Github, Trash2, Power, PauseCircle, MousePointerClick, FileText } from 'lucide-react';
 import { AppConfig, LogEntry } from './types';
 import { SettingsForm } from './components/SettingsForm';
@@ -78,7 +78,14 @@ export default function App() {
 
   const fetchUpdateLog = async () => {
       try {
-          const res = await fetch(`${API_BASE}/debug/update-log`);
+          const res = await fetch(`${API_BASE}/debug/update-log`, {
+              headers: { 'x-session-token': sessionToken || '' }
+          });
+          if (res.status === 401) {
+              setSessionToken(null);
+              localStorage.removeItem('sync_token');
+              throw new Error("Unauthorized");
+          }
           if (!res.ok) throw new Error("Failed to fetch logs");
           const text = await res.text();
           
@@ -108,8 +115,6 @@ export default function App() {
                   });
               }
           });
-          setUpdateLogData(parsed.reverse()); // Show newest first usually, but LogConsole handles scroll. 
-          // Actually let's keep chronological for the console component
           setUpdateLogData(parsed);
           
       } catch (e) {
@@ -128,7 +133,7 @@ export default function App() {
         setConfig(data);
         // Default to first enabled profile
         if (data.profiles && data.profiles.length > 0) {
-            const firstEnabled = data.profiles.find((p: any) => p.enabled) || data.profiles[0];
+            const firstEnabled = data.profiles.find((p: any) => p.enabled !== false) || data.profiles[0];
             setActiveProfileId(firstEnabled.id);
         }
       })
@@ -172,7 +177,7 @@ export default function App() {
     poll();
     const interval = setInterval(poll, 2000);
     return () => clearInterval(interval);
-  }, [logViewMode]);
+  }, [sessionToken, logViewMode]);
 
   // Reset AI logs when switching profiles
   useEffect(() => {
@@ -194,7 +199,8 @@ export default function App() {
         }
 
         try {
-            const res = await fetchJson(`${API_BASE}/docker/logs?container=${profile.actualAiContainer}`);
+            const containerName = encodeURIComponent(profile.actualAiContainer);
+            const res = await fetchJson(`${API_BASE}/docker/logs?container=${containerName}`);
             if (res) setRawAiLogs(res.logs || '');
         } catch (e) {
             console.error("Failed to fetch AI logs", e);
@@ -204,7 +210,7 @@ export default function App() {
     pollAi();
     const interval = setInterval(pollAi, 5000);
     return () => clearInterval(interval);
-  }, [activeProfileId, config.profiles, logViewMode]);
+  }, [sessionToken, activeProfileId, config.profiles, logViewMode]);
 
   // Compute Merged Logs
   const mergedLogs = useMemo(() => {
@@ -274,8 +280,8 @@ export default function App() {
     }
 
     // Combine and Sort
-    return [...systemLogs, ...parsedAiLogs].sort((a, b) => a.timestamp - b.timestamp);
-  }, [systemLogs, rawAiLogs, logViewMode, updateLogData]);
+    return [...filteredSystemLogs, ...parsedAiLogs].sort((a, b) => a.timestamp - b.timestamp);
+  }, [systemLogs, rawAiLogs, logViewMode, updateLogData, activeProfileId, config.profiles]);
 
 
   const handleProfileSelect = (id: string) => {
@@ -285,15 +291,18 @@ export default function App() {
 
   const handleSaveSettings = async (newConfig: AppConfig) => {
     try {
-      await fetchJson(`${API_BASE}/config`, {
+      const result = await fetchJson(`${API_BASE}/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newConfig)
       });
       setConfig(newConfig);
       setView('dashboard');
+      if (result?.warnings?.length) {
+        alert(`Settings saved, but some schedules were not enabled:\n\n${result.warnings.join('\n')}`);
+      }
     } catch (e) {
-      alert("Failed to save settings. Check console.");
+      alert(`Failed to save settings: ${(e as Error).message}`);
     }
   };
 
@@ -308,11 +317,12 @@ export default function App() {
       });
     } catch (e) {
       setProcessingProfiles(prev => prev.filter(id => id !== profileId));
-      alert("Failed to start sync.");
+      alert(`Failed to start sync: ${(e as Error).message}`);
     }
   };
 
   const toggleProfile = async (profileId: string, enabled: boolean) => {
+    const previousConfig = config;
     const updatedProfiles = config.profiles.map(p => 
         p.id === profileId ? { ...p, enabled } : p
     );
@@ -324,14 +334,22 @@ export default function App() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ ...config, profiles: updatedProfiles })
         });
-    } catch (e) { console.error(e); }
+    } catch (e) {
+        setConfig(previousConfig);
+        alert(`Failed to update profile state: ${(e as Error).message}`);
+    }
   };
 
   const deleteProfile = async (profileId: string) => {
       if (!confirm("Delete profile?")) return;
+      const previousConfig = config;
+      const previousActiveProfileId = activeProfileId;
       const updatedProfiles = config.profiles.filter(p => p.id !== profileId);
       setConfig({ ...config, profiles: updatedProfiles });
-      if (activeProfileId === profileId) setActiveProfileId(null);
+      if (activeProfileId === profileId) {
+          const nextProfile = updatedProfiles.find(p => p.enabled !== false) || updatedProfiles[0];
+          setActiveProfileId(nextProfile?.id || null);
+      }
 
       try {
           await fetchJson(`${API_BASE}/config`, {
@@ -339,7 +357,11 @@ export default function App() {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ ...config, profiles: updatedProfiles })
           });
-      } catch (e) { console.error(e); }
+      } catch (e) {
+          setConfig(previousConfig);
+          setActiveProfileId(previousActiveProfileId);
+          alert(`Failed to delete profile: ${(e as Error).message}`);
+      }
   };
 
   const activeProfileName = config.profiles.find(p => p.id === activeProfileId)?.name || 'System';
@@ -409,7 +431,10 @@ export default function App() {
                   await fetchJson(`${API_BASE}/update`, { method: 'POST' });
                   alert("Update started! Reload in 10s.");
                   setTimeout(() => window.location.reload(), 10000);
-                } catch (e) { setIsUpdating(false); }
+                } catch (e) {
+                  setIsUpdating(false);
+                  alert(`Failed to start update: ${(e as Error).message}`);
+                }
               }}
               disabled={isUpdating}
               className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-full animate-pulse"
@@ -418,7 +443,7 @@ export default function App() {
               Update
             </button>
           )}
-          <a href="https://github.com/sean-gordon/Investec-ActualBudget" target="_blank" className="p-2 rounded-full hover:bg-slate-800 text-slate-400">
+          <a href="https://github.com/sean-gordon/Investec-ActualBudget" target="_blank" rel="noreferrer" className="p-2 rounded-full hover:bg-slate-800 text-slate-400">
             <Github size={20} />
           </a>
           <button
@@ -436,7 +461,7 @@ export default function App() {
           
           {view === 'settings' ? (
             <div className="h-full overflow-y-auto">
-                <SettingsForm config={config} onSave={handleSaveSettings} />
+                <SettingsForm config={config} onSave={handleSaveSettings} sessionToken={sessionToken} />
             </div>
           ) : (
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-8 h-full">
