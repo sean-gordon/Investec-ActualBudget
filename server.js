@@ -364,7 +364,8 @@ if (process.env.WORKER_ACTION) {
                 
                 logP(`Fetching budget context...`, 'info');
                 try {
-                    await actual.downloadBudget(budgetId); 
+                    await actual.downloadBudget(budgetId);
+                    await actual.loadBudget(budgetId);
                 } catch (dlErr) {
                     const errString = dlErr.toString().toLowerCase();
                     if (errString.includes('invalid-password') || errString.includes('encryption')) {
@@ -372,6 +373,7 @@ if (process.env.WORKER_ACTION) {
                              logP(`File encrypted. Retrying with password...`, 'info');
                              try {
                                  await actual.downloadBudget(budgetId, { password: initConfig.password });
+                                 await actual.loadBudget(budgetId);
                              } catch (retryErr) {
                                  throw new Error(`Decryption Failed: ${retryErr.message}`);
                              }
