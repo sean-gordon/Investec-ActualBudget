@@ -15,3 +15,4 @@ services:
       - NODE_ENV=production
       - PORT=46490
       - PROJECT_ROOT=/host-project
+      - APP_PASSWORD=${APP_PASSWORD:-investec-sync-default}

@@ -180,6 +180,7 @@ check(dockerCompose.includes('host.docker.internal:host-gateway'), 'docker-compo
 check(dockerCompose.includes('./data:/app/data'), 'docker-compose.yml should persist app data');
 check(dockerCompose.includes('${HOST_DIR:-.}:/host-project'), 'docker-compose.yml should mount HOST_DIR separately from image-owned /app for self-update support');
 check(dockerCompose.includes('PROJECT_ROOT=/host-project'), 'docker-compose.yml should point maintenance commands at the mounted host project');
+check(dockerCompose.includes('APP_PASSWORD=${APP_PASSWORD:-investec-sync-default}'), 'docker-compose.yml should pass the configured dashboard password into the container');
 check(!dockerCompose.includes('${HOST_DIR:-.}:/app') && !dockerCompose.includes('/app/node_modules'), 'docker-compose.yml should not hide image app files with a project-root /app bind mount');
 check(dockerCompose.includes('/var/run/docker.sock:/var/run/docker.sock'), 'docker-compose.yml should expose Docker socket access');
 

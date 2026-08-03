@@ -78,6 +78,12 @@ cd Investec-ActualBudget
 ```
 
 ### 3. Build and Run
+Create a `.env` file in the project directory and set the dashboard password:
+
+```dotenv
+APP_PASSWORD=replace-with-a-strong-password
+```
+
 Start the application using Docker Compose. This will build the container and start the server:
 
 ```bash
