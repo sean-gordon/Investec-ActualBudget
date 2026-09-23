@@ -1,3 +1,11 @@
+# Release 7.0.2: Actual API 26.9.0
+
+Updated `@actual-app/api` to the latest stable version, `26.9.0`, and pinned it for consistent installs. The app now checks that your budget opens before reporting a successful connection, with a clearer error if it cannot load.
+
+This release also fixes Docker password forwarding and keeps the Compose project name consistent during updates.
+
+Before rebuilding, set `DOCKER_GID` in `.env` to the value from `stat -c '%g' /var/run/docker.sock`. Then run `docker compose up -d --build --force-recreate`.
+
 # Release v7.0.0 - Security Hardening
 
 ## 🚀 Key Highlights
