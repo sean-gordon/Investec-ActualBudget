@@ -84,6 +84,8 @@ Create a `.env` file in the project directory and set the dashboard password:
 APP_PASSWORD=replace-with-a-strong-password
 ```
 
+Find the Docker socket group ID with `stat -c '%g' /var/run/docker.sock` and add `DOCKER_GID=<group-id>` to the same `.env` file. Compose requires this value to grant the non-root app access to the Docker socket.
+
 Start the application using Docker Compose. This will build the container and start the server:
 
 ```bash
@@ -94,7 +96,19 @@ The app will start on port **46490**.
 
 If your Actual Budget server runs on the Docker host, use `http://host.docker.internal:<port>` as the server URL from inside the container.
 
-The container runs as the non-root `node` user. Docker-backed features such as Actual AI container discovery, Docker log viewing, self-update rebuilds, and image pruning require the mounted Docker socket to be usable by that user. If socket permissions do not allow that, the app will keep running and show a Docker unavailable message for those privileged actions.
+The container runs as the non-root `node` user. Docker-backed features such as Actual AI container discovery, Docker log viewing, self-update rebuilds, and image pruning require the mounted Docker socket to be usable by that user. Set `DOCKER_GID` in `.env` to the group ID of the host Docker socket before starting Compose:
+
+```bash
+stat -c '%g' /var/run/docker.sock
+```
+
+For example, if the command prints `990`, add `DOCKER_GID=990` to `.env`, then recreate the service:
+
+```bash
+docker compose up -d --build --force-recreate
+```
+
+Docker socket access effectively grants broad control of the Docker host; grant it only to trusted deployments.
 
 ---
 
@@ -260,7 +274,7 @@ This usually means your Sync ID is correct, but the file doesn't exist on the se
 *   From outside Docker, open this app at `http://localhost:46490`.
 
 ### Docker Unavailable in Settings
-The default deployment does not run the web app as root. If the Docker socket is mounted but not accessible to the `node` user, Actual AI container discovery, Docker log viewing, and in-app rebuild/update actions will report Docker as unavailable. Grant Docker socket access only if you accept that it gives the app broad control over the Docker host.
+Ensure `.env` contains `DOCKER_GID` matching the host socket's group ID (`stat -c '%g' /var/run/docker.sock`), then recreate the service with `docker compose up -d --build --force-recreate`. Docker socket access gives the app broad control over the Docker host.
 
 ### Accounts Merging Incorrectly
 The system tries to match accounts by name.

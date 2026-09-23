@@ -11,6 +11,8 @@ services:
       - ./data:/app/data
       - ${HOST_DIR:-.}:/host-project
       - /var/run/docker.sock:/var/run/docker.sock
+    group_add:
+      - "${DOCKER_GID:?Set DOCKER_GID to the Docker socket group ID on the host}"
     environment:
       - NODE_ENV=production
       - PORT=46490

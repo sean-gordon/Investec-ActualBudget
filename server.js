@@ -388,6 +388,14 @@ if (process.env.WORKER_ACTION) {
                     }
                 }
 
+                // Some API versions swallow budget-load errors after downloading.
+                // Verify the budget is queryable before reporting a successful connection.
+                try {
+                    await actual.getAccounts();
+                } catch (loadErr) {
+                    throw new Error(`Actual budget could not be opened: ${loadErr.message}. Ensure the Actual API version supports your server and budget version; check container logs for migration errors.`);
+                }
+
                 if (action === 'test-actual') {
                     process.send({ type: 'result', success: true, message: "Connection verified! Ready to sync." });
                     return;
