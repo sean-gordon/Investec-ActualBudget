@@ -33,7 +33,7 @@ Code security is actively monitored by **Snyk** to ensure dependencies and conta
 *   **Secure Architecture**: Uses process isolation for every sync to prevent database locks.
 *   **Automatic Account Creation**: Automatically creates accounts in Actual Budget based on your Investec products (e.g., "Private Bank Account 1234").
 *   **Category Synchronisation**: Define your master category list in the Settings UI. The system ensures these groups and categories exist in your budget.
-*   **Smart Deduplication**: Prevents duplicate transactions even if run multiple times a day.
+*   **Smart Deduplication**: Prevents duplicate transactions even if run multiple times a day. When Investec changes a pending transaction's `postedOrder` from `0` to its posted number, the sync updates the matching Actual transaction's import ID before importing, preserving the existing transaction and user edits. Matching requires the same account, transaction date, description and signed amount; separate posted payments retain their distinct IDs.
 *   **Transactions Only**: This tool merges transactions into your existing budget; it does not overwrite existing transaction data.
 *   **Robust Auto-Update System**: Easily update to the latest version directly from the dashboard with a single click. The system fetches the latest remote code, handles divergent branch history with a backup branch, rebuilds the container, and replaces the old one.
 *   **Integrated & Contextual Log Viewer**:

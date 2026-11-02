@@ -9,6 +9,7 @@ import { fork, exec } from 'child_process';
 import * as actual from '@actual-app/api';
 import dns from 'dns';
 import { v4 as uuidv4 } from 'uuid';
+import { reconcilePendingTransactions } from './transaction-sync.js';
 
 /**
  * ============================================================================
@@ -471,6 +472,12 @@ if (process.env.WORKER_ACTION) {
                         const actualTxs = rawTxs
                             .map(transformTransaction)
                             .filter(t => t.date); 
+
+                        const reconciled = await reconcilePendingTransactions(actual, matchedAccount.id, actualTxs);
+                        if (reconciled > 0) {
+                            logP(`  Matched ${reconciled} pending transactions to posted IDs.`, 'info');
+                            totalImported += reconciled;
+                        }
 
                         logP(`  Importing ${actualTxs.length} transactions...`, 'info');
                         const result = await actual.importTransactions(matchedAccount.id, actualTxs);

@@ -48,7 +48,7 @@ RUN npm ci --omit=dev
 COPY --from=builder /app/dist /app-dist
 
 # Copy server script
-COPY server.js .
+COPY server.js transaction-sync.js ./
 
 # Create data directory and adjust permissions for the node user
 RUN mkdir -p data && chown -R node:node /app /app-dist
