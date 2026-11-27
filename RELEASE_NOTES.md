@@ -1,3 +1,13 @@
+# Release 8.0.2: UI fixes and Actual Budget backwards compatibility
+
+Resolved UI glitches, broken/unlinked settings controls, and Actual Budget budget-loading edge cases while preserving backwards compatibility with existing profiles and older Actual Budget configurations.
+
+- Fixed encrypted Actual Budget detection (`missing-key` / `"encrypted"` errors), added an optional separate Budget Encryption Password field that falls back to the Server Password when blank, and added a local-ID `loadBudget()` fallback if `downloadBudget()` leaves the budget unloaded.
+- Fixed undefined Tailwind tokens (`investec-400` and `animate-fade-in`) so Settings headings and transitions render properly.
+- Fixed duplicate-profile secret handling so masked `********` placeholders are never saved as literal credentials on new profiles.
+- Fixed unapplied JSON category edits being dropped on save, preserved stopped/unavailable Actual AI containers in the selector, kept the active Git branch visible when GitHub branch listing fails, and handled `401` session expiry cleanly in Settings.
+- Fixed the double login error alert (now shown inline), fixed invalid `<div>` inside `<span>` markup, added Schedule column, Logout button, empty-state Settings shortcut, and tooltips/disabled states across dashboard actions.
+
 # Release 8.0.1: Actual API 26.11.0 and Node 22
 
 Updated `@actual-app/api` from `26.9.0` to `26.11.0` and upgraded the Docker base image to `node:22-trixie-slim` to resolve budget open/migration errors against newer Actual Budget servers (`No budget file is open`).

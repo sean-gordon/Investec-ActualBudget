@@ -7,6 +7,7 @@ export interface SyncProfile {
   investecApiKey: string;
   actualServerUrl: string;
   actualPassword?: string;
+  actualEncryptionPassword?: string;
   actualBudgetId: string;
   actualAiContainer?: string;
   syncSchedule: string; // Cron expression

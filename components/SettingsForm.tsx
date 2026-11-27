@@ -7,6 +7,7 @@ interface SettingsFormProps {
   config: AppConfig;
   onSave: (cfg: AppConfig) => void;
   sessionToken?: string | null;
+  onUnauthorized?: () => void;
 }
 
 const EMPTY_PROFILE: SyncProfile = {
@@ -18,11 +19,12 @@ const EMPTY_PROFILE: SyncProfile = {
     investecApiKey: '',
     actualServerUrl: '',
     actualPassword: '',
+    actualEncryptionPassword: '',
     actualBudgetId: '',
     syncSchedule: ''
 };
 
-export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave, sessionToken }) => {
+export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave, sessionToken, onUnauthorized }) => {
   const [profiles, setProfiles] = useState<SyncProfile[]>(config.profiles || []);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [hostProjectRoot, setHostProjectRoot] = useState(config.hostProjectRoot || '');
@@ -63,6 +65,10 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave, sess
   });
 
   const readJson = async (res: Response) => {
+    if (res.status === 401) {
+      onUnauthorized?.();
+      throw new Error('Unauthorized');
+    }
     const data = await res.json().catch(() => null);
     if (!res.ok) {
       throw new Error(data?.error || `Request failed with status ${res.status}`);
@@ -126,6 +132,13 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave, sess
     return () => clearInterval(interval);
   }, [sessionToken]);
 
+  // Reset editor UI state when switching profiles
+  useEffect(() => {
+      setShowPass(false);
+      setIsEditingCats(false);
+      setJsonError(null);
+  }, [selectedProfileId]);
+
   // Sync profile categories state when selection changes
   useEffect(() => {
       if (!selectedProfileId) {
@@ -170,7 +183,16 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave, sess
   const handleDuplicateProfile = (id: string) => {
       const p = profiles.find(x => x.id === id);
       if (!p) return;
-      const newProfile = { ...p, id: uuidv4(), name: `${p.name} (Copy)` };
+      const clearMasked = (val?: string) => (val === '********' ? '' : val || '');
+      const newProfile: SyncProfile = {
+          ...p,
+          id: uuidv4(),
+          name: `${p.name} (Copy)`,
+          investecSecretId: clearMasked(p.investecSecretId),
+          investecApiKey: clearMasked(p.investecApiKey),
+          actualPassword: clearMasked(p.actualPassword),
+          actualEncryptionPassword: clearMasked(p.actualEncryptionPassword)
+      };
       setProfiles(prev => [...prev, newProfile]);
       setSelectedProfileId(newProfile.id);
   };
@@ -237,7 +259,40 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave, sess
     }
   };
 
+  const handleSaveAll = () => {
+    let profilesToSave = profiles;
+    if (isEditingCats && selectedProfileId) {
+      try {
+        const parsed = JSON.parse(jsonText);
+        if (!validateCategoryTree(parsed)) {
+          throw new Error('Expected an object where each group name maps to an array of category names.');
+        }
+        setProfileCategories(parsed);
+        profilesToSave = profiles.map(p =>
+          p.id === selectedProfileId ? { ...p, categories: parsed } : p
+        );
+        setProfiles(profilesToSave);
+        setIsEditingCats(false);
+        setJsonError(null);
+      } catch (e: any) {
+        setJsonError(e.message);
+        return;
+      }
+    }
+    onSave({ profiles: profilesToSave, hostProjectRoot });
+  };
+
   const selectedProfile = profiles.find(p => p.id === selectedProfileId);
+  const availableBranches = (() => {
+    const list = [...branches];
+    if (currentBranch && currentBranch !== 'unknown' && currentBranch !== 'disabled' && !list.includes(currentBranch)) {
+      list.unshift(currentBranch);
+    }
+    return list;
+  })();
+  const savedContainerMissing = Boolean(
+    selectedProfile?.actualAiContainer && !containers.includes(selectedProfile.actualAiContainer)
+  );
 
   return (
     <div className="space-y-8 animate-fade-in pb-20">
@@ -268,16 +323,19 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave, sess
                         value={selectedBranch}
                         onChange={(e) => setSelectedBranch(e.target.value)}
                         className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-orange-500 outline-none transition-all"
-                        disabled={isSwitching}
+                        disabled={isSwitching || availableBranches.length === 0}
                     >
-                        {branches.map(b => (
+                        {availableBranches.length === 0 && (
+                            <option value="">(Unavailable)</option>
+                        )}
+                        {availableBranches.map(b => (
                             <option key={b} value={b}>{b}</option>
                         ))}
                     </select>
                     <button
                         onClick={handleBranchSwitch}
-                        disabled={isSwitching || (selectedBranch === currentBranch && !updateAvailable)}
-                        className={`px-4 py-2 rounded-lg font-bold transition-all text-sm whitespace-nowrap ${ isSwitching || (selectedBranch === currentBranch && !updateAvailable) ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-orange-600 hover:bg-orange-500 text-white'}`}
+                        disabled={isSwitching || !selectedBranch || (selectedBranch === currentBranch && !updateAvailable)}
+                        className={`px-4 py-2 rounded-lg font-bold transition-all text-sm whitespace-nowrap ${ isSwitching || !selectedBranch || (selectedBranch === currentBranch && !updateAvailable) ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-orange-600 hover:bg-orange-500 text-white'}`}
                     >
                         {isSwitching ? '...' : 
                             selectedBranch === currentBranch && updateAvailable ? 'Upgrade' : 
@@ -285,6 +343,12 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave, sess
                         }
                     </button>
                 </div>
+                {currentBranch && currentBranch !== 'unknown' && (
+                    <p className="text-xs text-slate-500">
+                        Active branch: <span className="font-mono text-slate-400">{currentBranch}</span>
+                        {updateAvailable ? ' (update available)' : ''}
+                    </p>
+                )}
             </div>
         </div>
       </section>
@@ -400,11 +464,13 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave, sess
                                     type={showPass ? "text" : "password"}
                                     value={selectedProfile.investecSecretId}
                                     onChange={(e) => handleProfileChange('investecSecretId', e.target.value)}
-                                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-investec-500 outline-none"
+                                    className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-4 pr-10 py-2 focus:ring-2 focus:ring-investec-500 outline-none"
                                 />
                                 <button
                                     type="button"
                                     onClick={() => setShowPass(!showPass)}
+                                    title={showPass ? 'Hide Secret ID' : 'Show Secret ID'}
+                                    aria-label={showPass ? 'Hide Secret ID' : 'Show Secret ID'}
                                     className="absolute right-3 top-2.5 text-slate-500 hover:text-slate-300"
                                 >
                                     {showPass ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -456,13 +522,23 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave, sess
                                 className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-purple-500 outline-none"
                             />
                         </div>
-                        <div className="space-y-2 md:col-span-2">
-                            <label className="text-sm text-slate-400">Budget Password (Optional)</label>
+                        <div className="space-y-2">
+                            <label className="text-sm text-slate-400">Server Password (Optional)</label>
                             <input
                                 type="password"
                                 value={selectedProfile.actualPassword || ''}
                                 onChange={(e) => handleProfileChange('actualPassword', e.target.value)}
                                 className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-purple-500 outline-none"
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-sm text-slate-400">Budget Encryption Password (Optional)</label>
+                            <input
+                                type="password"
+                                value={selectedProfile.actualEncryptionPassword || ''}
+                                onChange={(e) => handleProfileChange('actualEncryptionPassword', e.target.value)}
+                                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-purple-500 outline-none"
+                                placeholder="Defaults to Server Password if blank"
                             />
                         </div>
 
@@ -474,6 +550,11 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave, sess
                                 className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-purple-500 outline-none"
                             >
                                 <option value="">(None)</option>
+                                {savedContainerMissing && (
+                                    <option value={selectedProfile.actualAiContainer}>
+                                        {selectedProfile.actualAiContainer} (not currently running)
+                                    </option>
+                                )}
                                 {containers.map(c => (
                                     <option key={c} value={c}>{c}</option>
                                 ))}
@@ -555,7 +636,7 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave, sess
       {/* Save Button */}
       <div className="sticky bottom-6 flex justify-end">
         <button
-            onClick={() => onSave({ profiles, hostProjectRoot })}
+            onClick={handleSaveAll}
             className="flex items-center gap-2 bg-investec-500 hover:bg-yellow-400 text-black px-8 py-3 rounded-xl font-bold shadow-lg shadow-yellow-900/20 transition-all transform hover:scale-105"
         >
             <Save size={20} />

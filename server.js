@@ -374,18 +374,24 @@ if (process.env.WORKER_ACTION) {
                 await actual.init(initConfig);
                 
                 logP(`Fetching budget context...`, 'info');
+                const encryptionPassword = (payload.actualEncryptionPassword || '').trim() || password;
+                const explicitEncryptionPassword = (payload.actualEncryptionPassword || '').trim();
                 try {
                     // downloadBudget() loads the budget internally under its own local id;
-                    // do not follow up with loadBudget(budgetId) — the sync id is not the
+                    // do not follow up with loadBudget(budgetId) - the sync id is not the
                     // local id, and re-loading by sync id throws "budget-not-found".
-                    await actual.downloadBudget(budgetId);
+                    if (explicitEncryptionPassword) {
+                        await actual.downloadBudget(budgetId, { password: explicitEncryptionPassword });
+                    } else {
+                        await actual.downloadBudget(budgetId);
+                    }
                 } catch (dlErr) {
-                    const errString = dlErr.toString().toLowerCase();
-                    if (errString.includes('invalid-password') || errString.includes('encryption')) {
-                        if (initConfig.password) {
+                    const errString = `${dlErr?.message || ''} ${dlErr?.toString?.() || ''} ${dlErr?.code || ''}`.toLowerCase();
+                    if (errString.includes('invalid-password') || errString.includes('encrypt') || errString.includes('missing-key')) {
+                        if (encryptionPassword && !explicitEncryptionPassword) {
                              logP(`File encrypted. Retrying with password...`, 'info');
                              try {
-                                 await actual.downloadBudget(budgetId, { password: initConfig.password });
+                                 await actual.downloadBudget(budgetId, { password: encryptionPassword });
                              } catch (retryErr) {
                                  throw new Error(`Decryption Failed: ${retryErr.message}`);
                              }
@@ -399,12 +405,30 @@ if (process.env.WORKER_ACTION) {
                     }
                 }
 
-                // Some API versions swallow budget-load errors after downloading.
-                // Verify the budget is queryable before reporting a successful connection.
+                // Some API versions swallow budget-load errors or leave the budget unloaded after downloading.
+                // Verify the budget is queryable; if not open yet, try loading by its local id as a fallback.
                 try {
                     await actual.getAccounts();
                 } catch (loadErr) {
-                    throw new Error(`Actual budget could not be opened: ${loadErr.message} (Server: ${remoteActualVersion}, @actual-app/api: ${ACTUAL_API_VERSION}). Check container logs for migration errors.`);
+                    let finalErr = loadErr;
+                    if (String(loadErr?.message || '').toLowerCase().includes('no budget file is open')) {
+                        try {
+                            const budgets = await actual.getBudgets();
+                            const localBudget = (budgets || []).find(b => b.id && b.groupId === budgetId)
+                                || (budgets || []).find(b => b.id);
+                            if (localBudget?.id) {
+                                logP(`Budget downloaded but not open; loading local budget (${localBudget.id})...`, 'info');
+                                await actual.loadBudget(localBudget.id);
+                                await actual.getAccounts();
+                                finalErr = null;
+                            }
+                        } catch (fallbackErr) {
+                            finalErr = fallbackErr;
+                        }
+                    }
+                    if (finalErr) {
+                        throw new Error(`Actual budget could not be opened: ${finalErr.message} (Server: ${remoteActualVersion}, @actual-app/api: ${ACTUAL_API_VERSION}). Check container logs for migration errors.`);
+                    }
                 }
 
                 if (action === 'test-actual') {
@@ -683,7 +707,7 @@ const getHostDirEnv = (config) => {
     };
 };
 
-const PROFILE_SECRET_FIELDS = ['investecSecretId', 'investecApiKey', 'actualPassword'];
+const PROFILE_SECRET_FIELDS = ['investecSecretId', 'investecApiKey', 'actualPassword', 'actualEncryptionPassword'];
 
 const hydrateMaskedProfileSecrets = (profile) => {
     if (!profile || typeof profile !== 'object' || Array.isArray(profile)) return profile;
@@ -810,7 +834,8 @@ app.get('/api/config', (req, res) => {
             ...p,
             investecSecretId: p.investecSecretId ? '********' : '',
             investecApiKey: p.investecApiKey ? '********' : '',
-            actualPassword: p.actualPassword ? '********' : ''
+            actualPassword: p.actualPassword ? '********' : '',
+            actualEncryptionPassword: p.actualEncryptionPassword ? '********' : ''
         }))
     };
     res.json(sanitized);
@@ -833,13 +858,19 @@ app.post('/api/config', (req, res) => {
     if (newConfig.profiles && oldConfig.profiles) {
         newConfig.profiles = newConfig.profiles.map(newP => {
             const oldP = oldConfig.profiles.find(p => p.id === newP.id);
-            if (!oldP) return newP;
+            const resolveSecret = (field) => {
+                if (newP[field] === '********') {
+                    return oldP ? (oldP[field] || '') : '';
+                }
+                return newP[field];
+            };
             
             return {
                 ...newP,
-                investecSecretId: newP.investecSecretId === '********' ? oldP.investecSecretId : newP.investecSecretId,
-                investecApiKey: newP.investecApiKey === '********' ? oldP.investecApiKey : newP.investecApiKey,
-                actualPassword: newP.actualPassword === '********' ? oldP.actualPassword : newP.actualPassword
+                investecSecretId: resolveSecret('investecSecretId'),
+                investecApiKey: resolveSecret('investecApiKey'),
+                actualPassword: resolveSecret('actualPassword'),
+                actualEncryptionPassword: resolveSecret('actualEncryptionPassword')
             };
         });
     }

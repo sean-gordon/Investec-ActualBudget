@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Activity, Settings, Play, CreditCard, ExternalLink, Wifi, Download, Github, Trash2, Power, PauseCircle, MousePointerClick, FileText } from 'lucide-react';
+import { Activity, Settings, Play, CreditCard, ExternalLink, Wifi, Download, Github, Trash2, Power, PauseCircle, MousePointerClick, FileText, LogOut } from 'lucide-react';
 import { AppConfig, LogEntry } from './types';
 import { SettingsForm } from './components/SettingsForm';
 import { LogConsole } from './components/LogConsole';
@@ -27,8 +27,15 @@ export default function App() {
   const [serverVersion, setServerVersion] = useState<string>('Unknown');
   const [updateInfo, setUpdateInfo] = useState<{ available: boolean; latest: string } | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
 
   const [sessionToken, setSessionToken] = useState<string | null>(localStorage.getItem('sync_token'));
+
+  const handleLogout = () => {
+    setSessionToken(null);
+    localStorage.removeItem('sync_token');
+    setLoginError(null);
+  };
 
   const fetchJson = async (url: string, options: RequestInit = {}) => {
     const headers = {
@@ -38,8 +45,7 @@ export default function App() {
 
     const res = await fetch(url, { ...options, headers });
     if (res.status === 401 && !url.includes('/login')) {
-      setSessionToken(null);
-      localStorage.removeItem('sync_token');
+      handleLogout();
       throw new Error('Unauthorized');
     }
     if (!res.ok) {
@@ -54,20 +60,32 @@ export default function App() {
   };
 
   const handleLogin = async (password: string) => {
+    setLoginError(null);
     try {
-        const data = await fetchJson(`${API_BASE}/login`, {
+        const res = await fetch(`${API_BASE}/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ password })
         });
+        if (res.status === 401) {
+            setLoginError('Invalid password. Please try again.');
+            return false;
+        }
+        if (!res.ok) {
+            const text = await res.text().catch(() => 'No error details');
+            setLoginError(`Login failed (${res.status}): ${text.substring(0, 100)}`);
+            return false;
+        }
+        const data = await res.json();
         if (data?.token) {
             setSessionToken(data.token);
             localStorage.setItem('sync_token', data.token);
             return true;
         }
+        setLoginError('Login failed: no session token returned.');
         return false;
     } catch (e) {
-        alert("Login failed: " + (e as Error).message);
+        setLoginError(`Login failed: ${(e as Error).message}`);
         return false;
     }
   };
@@ -292,7 +310,15 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newConfig)
       });
-      setConfig(newConfig);
+      const savedConfig: AppConfig = (await fetchJson(`${API_BASE}/config`)) || newConfig;
+      setConfig(savedConfig);
+      setActiveProfileId(currentId => {
+        const profiles = savedConfig.profiles || [];
+        if (profiles.length === 0) return null;
+        if (currentId && profiles.some(p => p.id === currentId)) return currentId;
+        const firstEnabled = profiles.find(p => p.enabled !== false) || profiles[0];
+        return firstEnabled.id;
+      });
       setView('dashboard');
       if (result?.warnings?.length) {
         alert(`Settings saved, but some schedules were not enabled:\n\n${result.warnings.join('\n')}`);
@@ -377,8 +403,7 @@ export default function App() {
                     onSubmit={async (e) => {
                         e.preventDefault();
                         const pass = (e.currentTarget.elements.namedItem('password') as HTMLInputElement).value;
-                        const ok = await handleLogin(pass);
-                        if (!ok) alert("Invalid Password");
+                        await handleLogin(pass);
                     }}
                     className="space-y-4"
                 >
@@ -386,9 +411,13 @@ export default function App() {
                         name="password"
                         type="password" 
                         placeholder="Master Password"
+                        onChange={() => { if (loginError) setLoginError(null); }}
                         className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 focus:ring-2 focus:ring-investec-500 outline-none transition-all"
                         autoFocus
                     />
+                    {loginError && (
+                        <p className="text-sm text-red-400 text-center" role="alert">{loginError}</p>
+                    )}
                     <button 
                         type="submit"
                         className="w-full bg-investec-500 hover:bg-yellow-400 text-black font-bold py-3 rounded-xl transition-all shadow-lg shadow-yellow-900/10"
@@ -439,14 +468,31 @@ export default function App() {
               Update
             </button>
           )}
-          <a href="https://github.com/sean-gordon/Investec-ActualBudget" target="_blank" rel="noreferrer" className="p-2 rounded-full hover:bg-slate-800 text-slate-400">
+          <a
+            href="https://github.com/sean-gordon/Investec-ActualBudget"
+            target="_blank"
+            rel="noreferrer"
+            title="GitHub Repository"
+            aria-label="GitHub Repository"
+            className="p-2 rounded-full hover:bg-slate-800 text-slate-400"
+          >
             <Github size={20} />
           </a>
           <button
             onClick={() => setView(view === 'dashboard' ? 'settings' : 'dashboard')}
+            title={view === 'settings' ? 'Back to Dashboard' : 'Settings'}
+            aria-label={view === 'settings' ? 'Back to Dashboard' : 'Settings'}
             className={`p-2 rounded-full hover:bg-slate-800 ${view === 'settings' ? 'bg-slate-800 text-white' : 'text-slate-400'}`}
           >
             <Settings size={20} />
+          </button>
+          <button
+            onClick={handleLogout}
+            title="Log out"
+            aria-label="Log out"
+            className="p-2 rounded-full hover:bg-slate-800 text-slate-400 hover:text-red-400"
+          >
+            <LogOut size={20} />
           </button>
         </div>
       </header>
@@ -457,7 +503,7 @@ export default function App() {
           
           {view === 'settings' ? (
             <div className="h-full overflow-y-auto">
-                <SettingsForm config={config} onSave={handleSaveSettings} sessionToken={sessionToken} />
+                <SettingsForm config={config} onSave={handleSaveSettings} sessionToken={sessionToken} onUnauthorized={handleLogout} />
             </div>
           ) : (
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-8 h-full">
@@ -484,6 +530,7 @@ export default function App() {
                                     <th className="px-6 py-3 bg-slate-900">Status</th>
                                     <th className="px-6 py-3 bg-slate-900">Profile Name</th>
                                     <th className="px-6 py-3 bg-slate-900">Target</th>
+                                    <th className="px-6 py-3 bg-slate-900">Schedule</th>
                                     <th className="px-6 py-3 text-right bg-slate-900">Actions</th>
                                 </tr>
                             </thead>
@@ -493,6 +540,7 @@ export default function App() {
                                         const isSyncing = processingProfiles.includes(profile.id);
                                         const isEnabled = profile.enabled !== false;
                                         const isActive = activeProfileId === profile.id;
+                                        const syncDisabled = !isEnabled || isSyncing || !isConnected;
                                         
                                         return (
                                             <tr 
@@ -506,9 +554,9 @@ export default function App() {
                                             >
                                                 <td className="px-6 py-4 whitespace-nowrap">
                                                     {isSyncing ? (
-                                                        <span className="text-blue-400 text-xs flex items-center gap-1"><div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse"/> Syncing</span>
+                                                        <span className="text-blue-400 text-xs flex items-center gap-1"><span className="inline-block w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse"/> Syncing</span>
                                                     ) : isEnabled ? (
-                                                        <span className="text-emerald-400 text-xs flex items-center gap-1"><div className="w-1.5 h-1.5 bg-emerald-500 rounded-full"/> Ready</span>
+                                                        <span className="text-emerald-400 text-xs flex items-center gap-1"><span className="inline-block w-1.5 h-1.5 bg-emerald-500 rounded-full"/> Ready</span>
                                                     ) : (
                                                         <span className="text-slate-500 text-xs">Disabled</span>
                                                     )}
@@ -516,25 +564,37 @@ export default function App() {
                                                 <td className="px-6 py-4 font-medium text-white">
                                                     {profile.name}
                                                 </td>
-                                                <td className="px-6 py-4 font-mono text-xs text-slate-500 truncate max-w-[150px]">
+                                                <td className="px-6 py-4 font-mono text-xs text-slate-500 truncate max-w-[180px]" title={profile.actualServerUrl}>
                                                     {profile.actualServerUrl}
+                                                </td>
+                                                <td className="px-6 py-4 font-mono text-xs text-slate-500 whitespace-nowrap">
+                                                    {profile.syncSchedule || 'Manual'}
                                                 </td>
                                                 <td className="px-6 py-4 text-right" onClick={e => e.stopPropagation()}>
                                                     <div className="flex items-center justify-end gap-2">
                                                         <button
                                                             onClick={() => triggerSync(profile.id)}
-                                                            disabled={!isEnabled || isSyncing || !isConnected}
-                                                            className={`p-1.5 rounded-md ${!isEnabled || isSyncing ? 'text-slate-600' : 'text-investec-500 hover:bg-investec-500/10'}`}
+                                                            disabled={syncDisabled}
+                                                            title={isSyncing ? 'Sync running' : !isConnected ? 'Server offline' : !isEnabled ? 'Profile disabled' : 'Run sync now'}
+                                                            aria-label={`Sync ${profile.name}`}
+                                                            className={`p-1.5 rounded-md ${syncDisabled ? 'text-slate-600 cursor-not-allowed' : 'text-investec-500 hover:bg-investec-500/10'}`}
                                                         >
                                                             <Play size={16} fill={isSyncing ? "none" : "currentColor"} />
                                                         </button>
                                                         <button
                                                             onClick={() => toggleProfile(profile.id, !isEnabled)}
+                                                            title={isEnabled ? 'Disable profile' : 'Enable profile'}
+                                                            aria-label={isEnabled ? `Disable ${profile.name}` : `Enable ${profile.name}`}
                                                             className={`p-1.5 rounded-md ${isEnabled ? 'text-slate-400 hover:text-orange-400' : 'text-slate-600 hover:text-green-400'}`}
                                                         >
                                                             {isEnabled ? <PauseCircle size={16} /> : <Power size={16} />}
                                                         </button>
-                                                        <button onClick={() => deleteProfile(profile.id)} className="p-1.5 rounded-md text-slate-500 hover:text-red-400">
+                                                        <button
+                                                            onClick={() => deleteProfile(profile.id)}
+                                                            title="Delete profile"
+                                                            aria-label={`Delete ${profile.name}`}
+                                                            className="p-1.5 rounded-md text-slate-500 hover:text-red-400"
+                                                        >
                                                             <Trash2 size={16} />
                                                         </button>
                                                     </div>
@@ -543,7 +603,18 @@ export default function App() {
                                         );
                                     })
                                 ) : (
-                                    <tr><td colSpan={4} className="px-6 py-8 text-center text-slate-500 italic">No profiles found.</td></tr>
+                                    <tr>
+                                        <td colSpan={5} className="px-6 py-10 text-center text-slate-500">
+                                            <p className="italic mb-3">No profiles found.</p>
+                                            <button
+                                                onClick={() => setView('settings')}
+                                                className="inline-flex items-center gap-2 px-4 py-2 bg-investec-500 hover:bg-yellow-400 text-black text-xs font-bold rounded-lg transition-colors"
+                                            >
+                                                <Settings size={14} />
+                                                Open Settings to Add a Profile
+                                            </button>
+                                        </td>
+                                    </tr>
                                 )}
                             </tbody>
                         </table>

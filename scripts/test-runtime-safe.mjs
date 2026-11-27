@@ -172,6 +172,7 @@ try {
     investecApiKey: 'api-key',
     actualServerUrl: 'http://actual.example',
     actualPassword: 'budget-password',
+    actualEncryptionPassword: 'encryption-password',
     actualBudgetId: 'budget-id',
     syncSchedule: 'invalid cron',
     categories: {
@@ -195,7 +196,8 @@ try {
   if (
     maskedProfile?.investecSecretId !== '********' ||
     maskedProfile?.investecApiKey !== '********' ||
-    maskedProfile?.actualPassword !== '********'
+    maskedProfile?.actualPassword !== '********' ||
+    maskedProfile?.actualEncryptionPassword !== '********'
   ) {
     throw new Error('/api/config should mask saved secrets');
   }
