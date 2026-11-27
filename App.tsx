@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo } from 'react';
-import { Activity, Settings, Play, CreditCard, ExternalLink, Wifi, Download, Github, Trash2, Power, PauseCircle, MousePointerClick, FileText, LogOut } from 'lucide-react';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { Activity, Settings, Play, CreditCard, ExternalLink, Wifi, Download, Github, Trash2, Power, PauseCircle, MousePointerClick, FileText, LogOut, RefreshCw } from 'lucide-react';
 import { AppConfig, LogEntry } from './types';
 import { SettingsForm } from './components/SettingsForm';
 import { LogConsole } from './components/LogConsole';
@@ -20,7 +20,9 @@ export default function App() {
   
   // Update Log View State
   const [logViewMode, setLogViewMode] = useState<'live' | 'file'>('live');
+  const logViewModeRef = useRef<'live' | 'file'>('live');
   const [updateLogData, setUpdateLogData] = useState<LogEntry[]>([]);
+  const [isLoadingUpdateLog, setIsLoadingUpdateLog] = useState(false);
   
   const [isConnected, setIsConnected] = useState(false);
   const [processingProfiles, setProcessingProfiles] = useState<string[]>([]);
@@ -102,41 +104,44 @@ export default function App() {
     }
   };
 
-  const fetchUpdateLog = async () => {
+  const fetchUpdateLog = async (silent = false) => {
+      if (!silent) setIsLoadingUpdateLog(true);
       try {
           const res = await fetch(`${API_BASE}/debug/update-log`, {
-              headers: { 'x-session-token': sessionToken || '' }
+              headers: { 'x-session-token': sessionToken || '' },
+              cache: 'no-store'
           });
           if (res.status === 401) {
-              setSessionToken(null);
-              localStorage.removeItem('sync_token');
+              handleLogout();
               throw new Error("Unauthorized");
           }
-          if (!res.ok) throw new Error("Failed to fetch logs");
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const text = await res.text();
           
           const parsed: LogEntry[] = [];
           const lines = text.split('\n');
           // Regex to match: [2024-12-12T10:00:00.000Z] Message
           const regex = /^\[(.*?)\] (.*)$/;
+          let lastTimestamp = Date.now();
           
           lines.forEach(line => {
-              const match = line.match(regex);
+              const cleanLine = line.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+              const match = cleanLine.match(regex);
               if (match) {
                   const ts = Date.parse(match[1]);
                   const msg = match[2];
+                  lastTimestamp = isNaN(ts) ? lastTimestamp : ts;
                   parsed.push({
-                      timestamp: isNaN(ts) ? Date.now() : ts,
+                      timestamp: lastTimestamp,
                       message: msg,
-                      type: msg.toLowerCase().includes('error') ? 'error' : 'info',
+                      type: msg.toLowerCase().includes('error') || msg.toLowerCase().includes('failed') ? 'error' : 'info',
                       source: 'System'
                   });
-              } else if (line.trim()) {
-                  // Fallback for lines that don't match standard format (e.g. stack traces)
+              } else if (cleanLine.trim()) {
                   parsed.push({
-                      timestamp: Date.now(), // or previous timestamp
-                      message: line,
-                      type: 'info',
+                      timestamp: lastTimestamp,
+                      message: cleanLine,
+                      type: cleanLine.toLowerCase().includes('error') ? 'error' : 'info',
                       source: 'System'
                   });
               }
@@ -145,9 +150,25 @@ export default function App() {
           
       } catch (e) {
           console.error("Fetch update log failed", e);
-          alert("Could not fetch update log.");
+          if (!silent && (e as Error).message !== 'Unauthorized') {
+              alert(`Could not fetch update log: ${(e as Error).message}`);
+          }
+      } finally {
+          if (!silent) setIsLoadingUpdateLog(false);
       }
   };
+
+  useEffect(() => {
+    logViewModeRef.current = logViewMode;
+  }, [logViewMode]);
+
+  useEffect(() => {
+    if (!sessionToken || logViewMode !== 'file') return;
+    fetchUpdateLog();
+    if (!isUpdating) return;
+    const interval = setInterval(() => fetchUpdateLog(true), 3000);
+    return () => clearInterval(interval);
+  }, [sessionToken, logViewMode, isUpdating]);
 
   // Initial Load & Version Check
   useEffect(() => {
@@ -189,7 +210,7 @@ export default function App() {
           setIsUpdating(statusData.isUpdating);
         }
 
-        if (logViewMode === 'live') {
+        if (logViewModeRef.current === 'live') {
             const logsData = await fetchJson(`${API_BASE}/logs`);
             if (!logsData) return;
             // Tag system logs
@@ -206,7 +227,7 @@ export default function App() {
     poll();
     const interval = setInterval(poll, 2000);
     return () => clearInterval(interval);
-  }, [sessionToken, logViewMode]);
+  }, [sessionToken]);
 
   // Reset AI logs when switching profiles
   useEffect(() => {
@@ -680,24 +701,50 @@ export default function App() {
                             </p>
                         </div>
                         
-                        <button
-                            onClick={() => {
-                                if (logViewMode === 'live') {
-                                    setLogViewMode('file');
-                                    fetchUpdateLog();
-                                } else {
-                                    setLogViewMode('live');
-                                }
-                            }}
-                            className={`p-2 rounded-lg transition-colors border ${
-                                logViewMode === 'file' 
-                                ? 'bg-investec-500/10 text-investec-500 border-investec-500/50' 
-                                : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'
-                            }`}
-                            title={logViewMode === 'live' ? "View Update History" : "View Live Stream"}
-                        >
-                            {logViewMode === 'live' ? <FileText size={16} /> : <Activity size={16} />}
-                        </button>
+                        <div className="flex items-center gap-1.5">
+                            {logViewMode === 'file' && (
+                                <button
+                                    type="button"
+                                    onClick={() => fetchUpdateLog()}
+                                    disabled={isLoadingUpdateLog}
+                                    className="p-2 rounded-lg transition-colors border bg-slate-800 text-slate-400 border-slate-700 hover:text-white disabled:opacity-50"
+                                    title="Refresh Update History"
+                                    aria-label="Refresh Update History"
+                                >
+                                    <RefreshCw size={14} className={isLoadingUpdateLog ? 'animate-spin' : ''} />
+                                </button>
+                            )}
+                            <div className="flex rounded-lg border border-slate-700 bg-slate-950 p-0.5">
+                                <button
+                                    type="button"
+                                    onClick={() => setLogViewMode('live')}
+                                    className={`flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                                        logViewMode === 'live'
+                                        ? 'bg-slate-800 text-white'
+                                        : 'text-slate-400 hover:text-slate-200'
+                                    }`}
+                                    title="View Live Stream"
+                                    aria-pressed={logViewMode === 'live'}
+                                >
+                                    <Activity size={13} />
+                                    Live
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setLogViewMode('file')}
+                                    className={`flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                                        logViewMode === 'file'
+                                        ? 'bg-investec-500/20 text-investec-500'
+                                        : 'text-slate-400 hover:text-slate-200'
+                                    }`}
+                                    title="View Update History"
+                                    aria-pressed={logViewMode === 'file'}
+                                >
+                                    <FileText size={13} />
+                                    History
+                                </button>
+                            </div>
+                        </div>
                     </div>
                     <div className="flex-1 overflow-hidden p-0 relative">
                          <div className="absolute inset-0">

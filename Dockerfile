@@ -37,30 +37,31 @@ RUN apt-get update && apt-get install -y python3 make g++ git openssl ca-certifi
 RUN git config --system --add safe.directory /app && \
     git config --system --add safe.directory /host-project
 
+# Prepare directories owned by the non-root node user before installing dependencies
+# This avoids an expensive recursive chown over node_modules on every rebuild
+RUN mkdir -p /app/data /app-dist && chown node:node /app /app/data /app-dist
+
+# Switch to non-root user
+USER node
+
 # Copy package files
-COPY package.json package-lock.json* ./
+COPY --chown=node:node package.json package-lock.json* ./
 
 # Install only production dependencies exactly as locked
 # This recompiles better-sqlite3 for the production environment
 RUN npm ci --omit=dev
 
 # Copy built assets from builder stage to a safe location
-COPY --from=builder /app/dist /app-dist
+COPY --chown=node:node --from=builder /app/dist /app-dist
 
-# Copy server script
-COPY server.js transaction-sync.js ./
-
-# Create data directory and adjust permissions for the node user
-RUN mkdir -p data && chown -R node:node /app /app-dist
+# Copy server scripts
+COPY --chown=node:node server.js transaction-sync.js ./
 
 # Expose the application port
 EXPOSE 46490
 
 # Serve the frontend built into the image even when /app is bind-mounted at runtime
 ENV DIST_DIR=/app-dist
-
-# Switch to non-root user
-USER node
 
 # Start the backend server
 CMD ["node", "server.js"]

@@ -1,3 +1,12 @@
+# Release 8.0.4: Explicit log tabs and faster Docker rebuilds
+
+Replaced the single log-mode toggle button with explicit Live / History tabs, prevented proxy caching on update logs, and sped up Docker rebuilds.
+
+- Replaced the single Update History toggle icon with explicit `Live` and `History` tabs plus a Refresh button so a click or bounce can never accidentally toggle back to live logs.
+- Decoupled `/api/status` polling from log tab switches and auto-refreshed `History` while an update is running.
+- Served `/api/debug/update-log` as `text/plain; charset=utf-8` with `Cache-Control: no-store` instead of `res.sendFile()`.
+- Switched the `Dockerfile` production stage to `COPY --chown=node:node` and running `npm ci --omit=dev` as `node`, removing the slow recursive `chown -R` over `node_modules/`.
+
 # Release 8.0.3: Reliable in-app self-updates and cleaner logs
 
 Fixed in-app updates causing 502 Bad Gateway errors when replacing the running container, preserved `data/` bind mounts during container-triggered rebuilds, and cleaned up proxy errors and container logs in the UI.

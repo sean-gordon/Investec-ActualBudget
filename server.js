@@ -1284,8 +1284,14 @@ app.get('/api/docker/logs', (req, res) => {
 });
 
 app.get('/api/debug/update-log', (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.type('text/plain; charset=utf-8');
     if (fs.existsSync(UPDATE_LOG)) {
-        res.sendFile(UPDATE_LOG);
+        try {
+            res.send(fs.readFileSync(UPDATE_LOG, 'utf-8'));
+        } catch (e) {
+            res.status(500).send(`Failed to read update log: ${e.message}`);
+        }
     } else {
         res.send("No update log found.");
     }
