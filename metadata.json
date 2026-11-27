@@ -1,5 +1,0 @@
-{
-  "name": "Investec to Actual Sync",
-  "description": "A dashboard to synchronize transaction data from Investec Open API to Actual Budget.",
-  "requestFramePermissions": []
-}

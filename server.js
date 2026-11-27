@@ -1,5 +1,4 @@
 import express from 'express';
-import bodyParser from 'body-parser';
 import cors from 'cors';
 import cron from 'node-cron';
 import fs from 'fs';
@@ -68,7 +67,6 @@ const MASTER_PASSWORD = process.env.APP_PASSWORD || 'investec-sync-default'; // 
 
 // TLS Verification should be ENABLED by default.
 // If using self-signed certs, the CA should be added to the system/docker trust store.
-// process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"; // REMOVED FOR SECURITY
 
 const logToFile = (msg) => {
     const timestamp = new Date().toISOString();
@@ -747,7 +745,7 @@ const spawnWorker = (action, payload) => {
 };
 
 app.use(cors());
-app.use(bodyParser.json());
+app.use(express.json());
 
 // --- AUTH MIDDLEWARE ---
 const authenticate = (req, res, next) => {
@@ -1278,8 +1276,6 @@ setTimeout(() => {
         return;
     }
 
-    // Check if we just switched branches
-    const config = loadConfig();
     try {
         exec('git rev-parse --abbrev-ref HEAD', { cwd: PROJECT_ROOT }, (err, stdout) => {
             if (!err && stdout) {

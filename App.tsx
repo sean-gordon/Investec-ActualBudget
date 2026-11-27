@@ -36,25 +36,21 @@ export default function App() {
       'x-session-token': sessionToken || ''
     };
 
-    try {
-      const res = await fetch(url, { ...options, headers });
-      if (res.status === 401 && !url.includes('/login')) {
-        setSessionToken(null);
-        localStorage.removeItem('sync_token');
-        throw new Error('Unauthorized');
-      }
-      if (!res.ok) {
-        const text = await res.text().catch(() => 'No error details');
-        throw new Error(`API Error ${res.status}: ${text.substring(0, 100)}`);
-      }
-      const contentType = res.headers.get('content-type');
-      if (contentType && contentType.includes('application/json')) {
-        return await res.json();
-      }
-      return null;
-    } catch (error) {
-      throw error;
+    const res = await fetch(url, { ...options, headers });
+    if (res.status === 401 && !url.includes('/login')) {
+      setSessionToken(null);
+      localStorage.removeItem('sync_token');
+      throw new Error('Unauthorized');
     }
+    if (!res.ok) {
+      const text = await res.text().catch(() => 'No error details');
+      throw new Error(`API Error ${res.status}: ${text.substring(0, 100)}`);
+    }
+    const contentType = res.headers.get('content-type');
+    if (contentType && contentType.includes('application/json')) {
+      return await res.json();
+    }
+    return null;
   };
 
   const handleLogin = async (password: string) => {

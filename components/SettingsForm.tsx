@@ -133,13 +133,11 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ config, onSave, sess
           setJsonText('');
           return;
       }
-      if (selectedProfileId) {
-          const profile = profiles.find(p => p.id === selectedProfileId);
-          if (profile) {
-              const cats = profile.categories || defaultCategories;
-              setProfileCategories(cats);
-              setJsonText(JSON.stringify(cats, null, 2));
-          }
+      const profile = profiles.find(p => p.id === selectedProfileId);
+      if (profile) {
+          const cats = profile.categories || defaultCategories;
+          setProfileCategories(cats);
+          setJsonText(JSON.stringify(cats, null, 2));
       }
   }, [selectedProfileId, profiles, defaultCategories]);
 

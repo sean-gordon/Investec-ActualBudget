@@ -7,21 +7,46 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
+# Dependencies & Build Outputs
+node_modules/
+dist/
+dist-ssr/
+coverage/
+*.tsbuildinfo
+
+# Local Environment & Runtime Data
 *.local
 .env
+.env.*
+!.env.example
+data/
+backup/
 
-# Editor directories and files
+# AI Assistant & Agent Files
+CLAUDE.md
+CLAUDE.local.md
+GEMINI.md
+.claude/
+.gemini/
+.agents/
+.agent/
+.codex/
+.cursor/
+.cursorrules
+.windsurfrules
+.clinerules
+.aider*
+docs/agents/
+
+# Editor & OS Files
 .vscode/*
 !.vscode/extensions.json
-.idea
+.idea/
 .DS_Store
+Thumbs.db
+desktop.ini
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
-data/
-backup/

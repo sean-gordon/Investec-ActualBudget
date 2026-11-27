@@ -1,98 +1,65 @@
-# Investec to Actual Budget Sync
+# Investec to Actual Budget sync
 
-A self-hosted dashboard to automatically synchronise transactions from multiple Investec South Africa (OpenAPI) accounts to Actual Budget instances.
+A self-hosted dashboard that synchronises transactions from Investec South Africa (OpenAPI) accounts into Actual Budget.
 
-## Security First
-
-Code security is actively monitored by **Snyk** to ensure dependencies and container images remain free of known vulnerabilities.
+## Security and architecture
 
 [![Known Vulnerabilities](https://snyk.io/test/github/sean-gordon/Investec-ActualBudget/badge.svg)](https://snyk.io/test/github/sean-gordon/Investec-ActualBudget)
 
-### 🛡️ Architecture & Data Privacy
+Snyk monitors the repository's dependencies and container images for known vulnerabilities.
 
-*   **Process Isolation**: The sync engine runs in a dedicated "Worker Process" that is spawned only when needed and terminates immediately after completion. This ensures:
-    *   **Memory Safety**: No residual data stays in memory.
-    *   **Database Integrity**: Prevents database locks by ensuring a clean connection lifecycle.
-*   **Containerized Environment**: The application runs within a Docker container, isolating it from the host system.
-    *   **Networking**: Internal communication between the frontend and backend occurs over a private internal network (when configured with `network_mode: bridge`).
-*   **Credential Handling**: 
-    *   Investec API keys and Actual Budget passwords are stored locally in `data/settings.json` within the container's volume.
-    *   Credentials are **never** transmitted to any third-party server. All traffic is strictly between your server, Investec, and your Actual Budget instance.
-*   **Source Code Transparency**: The entire project is open-source. You can inspect every line of code to verify how your data is handled.
+Each sync or credential test runs in its own worker process that starts on demand and exits as soon as the job finishes. That keeps the main server separate from the sync engine, leaves no sync data in memory after a run, and prevents Actual's local database from locking across jobs.
+
+The application runs inside a Docker container. When configured with `network_mode: bridge`, frontend-to-backend traffic stays on a private internal network. Investec API keys and Actual Budget passwords are stored locally in `data/settings.json` inside the mounted volume and are only sent between your server, Investec, and your Actual Budget instance. All source code is open in this repository.
 
 ## Features
 
-*   **Multi-Profile Support**: Manage multiple sync profiles (e.g., "Sean's Account", "Shelley's Account") from a single dashboard.
-*   **Clean Table View**: Profiles are displayed in a responsive table, showing status, target, and schedule at a glance.
-*   **Profile Controls**:
-    *   **Enable/Disable**: Toggle profiles on or off directly from the dashboard or settings.
-    *   **Test Credentials**: Verify your Investec and Actual Budget connections before saving.
-    *   **Delete**: Remove unused profiles with a safe confirmation step.
-*   **Flexible Targets**: Each profile can sync to a different Actual Budget server (different ports/URLs) or different budget files.
-*   **Concurrent Syncing**: The system can now run sync jobs for different profiles in parallel without conflict.
-*   **Secure Architecture**: Uses process isolation for every sync to prevent database locks.
-*   **Automatic Account Creation**: Automatically creates accounts in Actual Budget based on your Investec products (e.g., "Private Bank Account 1234").
-*   **Category Synchronisation**: Define your master category list in the Settings UI. The system ensures these groups and categories exist in your budget.
-*   **Smart Deduplication**: Prevents duplicate transactions even if run multiple times a day. When Investec changes a pending transaction's `postedOrder` from `0` to its posted number, the sync updates the matching Actual transaction's import ID before importing, preserving the existing transaction and user edits. Matching requires the same account, transaction date, description and signed amount; separate posted payments retain their distinct IDs.
-*   **Transactions Only**: This tool merges transactions into your existing budget; it does not overwrite existing transaction data.
-*   **Robust Auto-Update System**: Easily update to the latest version directly from the dashboard with a single click. The system fetches the latest remote code, handles divergent branch history with a backup branch, rebuilds the container, and replaces the old one.
-*   **Integrated & Contextual Log Viewer**:
-    *   **Unified Log Console**: Merges System logs (Investec Sync events) and Actual AI logs (from your AI container) into a single, chronologically sorted stream.
-    *   **Profile-Driven Display**: Clicking any profile row in the dashboard dynamically loads logs relevant to that specific profile.
-    *   **Smart Log Filtering**: System logs are intelligently filtered to show only generic system events and events strictly pertaining to the selected profile, preventing cross-profile log contamination, especially with overlapping profile names.
-    *   **Actual AI Log Viewer**: Directly monitor live logs from your associated Actual AI Docker container, with running containers auto-detected for easy selection in settings.
-    *   **Update History Button**: A dedicated button in the log panel header (`📄` icon) to view persistent historical update logs.
-
-
----
+- Manage multiple sync profiles (for example, "Sean's Account" and "Shelley's Account") from one dashboard table showing each profile's status, target, and actions.
+- Enable or disable profiles without deleting them, test Investec and Actual Budget connections before saving, and remove unused profiles with a confirmation prompt.
+- Point each profile at a different Actual Budget server URL, port, or budget file, and run sync jobs for different profiles concurrently in isolated worker processes.
+- Create missing accounts in Actual Budget automatically from your Investec products (for example, "Private Bank Account 1234").
+- Define category groups and categories in Settings so the sync creates any missing ones in your budget.
+- Deduplicate transactions safely across repeated runs on the same day. When Investec changes a pending transaction's `postedOrder` from `0` to its posted number, the sync updates the matching Actual transaction's import ID before importing, keeping the existing entry and any user edits. Matching requires the same account, transaction date, description, and signed amount; separate posted payments keep their distinct IDs.
+- Merge new transactions into your budget without overwriting existing transaction data.
+- Trigger updates from the dashboard. The updater fetches remote code, creates a backup branch if local history has diverged, rebuilds the container, and replaces the running instance.
+- View live System logs and Actual AI container logs in a single chronologically sorted console. Clicking a profile row filters the console to generic system events and entries for that profile, even when profile names overlap. Running Docker containers are detected automatically for Actual AI selection in Settings, and a header toggle switches between live logs and persistent update history logs.
 
 ## Prerequisites
 
-Before installing this sync tool, ensure you have the following:
-
-### 1. Docker
-You must have Docker and Docker Compose installed on your machine or server.
-
-### 2. Actual Budget
-You need a running instance of **Actual Budget** (Self-Hosted). This tool syncs data *to* your Actual Budget instance.
-*   **Get Actual Budget**: [Official Installation Guide](https://actualbudget.org/docs/install/)
-
----
+- Docker and Docker Compose on your machine or server.
+- A running self-hosted Actual Budget instance. See the [Official Installation Guide](https://actualbudget.org/docs/install/).
 
 ## Installation
 
-Follow these steps to get the system running on your server.
-
-### 1. Clone the Repository
-Open your terminal and clone the project files from GitHub:
+### 1. Clone the repository
 
 ```bash
 git clone https://github.com/sean-gordon/Investec-ActualBudget
 ```
 
-### 2. Enter the Directory
-Navigate into the newly created folder:
+### 2. Enter the directory
 
 ```bash
 cd Investec-ActualBudget
 ```
 
-### 3. Build and Run
+### 3. Build and run
+
 Create a `.env` file in the project directory and set the dashboard password:
 
 ```dotenv
 APP_PASSWORD=replace-with-a-strong-password
 ```
 
-Find the Docker socket group ID with `stat -c '%g' /var/run/docker.sock` and add `DOCKER_GID=<group-id>` to the same `.env` file. Compose requires this value to grant the non-root app access to the Docker socket.
+Find the Docker socket group ID with `stat -c '%g' /var/run/docker.sock` and add `DOCKER_GID=<group-id>` to the same `.env` file. Docker Compose requires this value so the non-root app user can access the mounted Docker socket.
 
-Start the application using Docker Compose. This will build the container and start the server:
+Build the container and start the server with Docker Compose:
 
 ```bash
 docker compose up -d --build
 ```
 
-The app will start on port **46490**.
+The app listens on port `46490`.
 
 If your Actual Budget server runs on the Docker host, use `http://host.docker.internal:<port>` as the server URL from inside the container.
 
@@ -108,21 +75,19 @@ For example, if the command prints `990`, add `DOCKER_GID=990` to `.env`, then r
 docker compose up -d --build --force-recreate
 ```
 
-Docker socket access effectively grants broad control of the Docker host; grant it only to trusted deployments.
+Docker socket access gives the container broad control over the Docker host, so only grant it in trusted deployments.
 
----
+## Updates and maintenance
 
-## Updates & Maintenance
+### Automatic update (recommended)
 
-Keeping the application up-to-date is simple.
+1. Open the dashboard.
+2. When a newer version is available, an Update button appears in the top header.
+3. Click it. The app fetches the latest code, recovers from divergent branch history when needed, and rebuilds the container.
 
-### Method 1: Automatic Update (Recommended)
-1.  Open the dashboard.
-2.  If a new version is available, an **Update Available** button will appear in the top header.
-3.  Click the button. The system will fetch the latest code, recover from divergent branch history when needed, and rebuild itself automatically.
+### Manual update
 
-### Method 2: Manual Update
-Run the following commands in your terminal inside the project folder:
+Run these commands inside the project folder:
 
 ```bash
 git fetch --all --tags --prune
@@ -130,37 +95,28 @@ git merge --ff-only origin/$(git branch --show-current)
 docker compose up -d --build
 ```
 
----
-
 ## Configuration
 
-1.  Open your browser and go to `http://localhost:46490` (or your server IP).
-2.  Click the **Settings** (Gear icon) in the top right.
+Open `http://localhost:46490` (or your server IP) in a browser and click the Settings gear icon in the top right.
 
-### 1. Sync Profiles
-The "Profiles" system allows you to manage multiple sync configurations independently.
-*   **Create Profile**: Click the `+` button to add a new profile.
-*   **Name**: Give your profile a descriptive name (e.g., "Sean's Investec").
-*   **Enable/Disable**: Use the toggle to temporarily pause syncing for a profile without deleting it.
-*   **Test Connections**: Use the "Test Connection" buttons to verify your credentials for both Investec and Actual Budget.
-*   **Credentials**: Enter the unique Investec Client ID, Secret, and API Key for this profile.
-*   **Actual Budget Target**: 
-    *   **Server URL**: Specify the exact URL and port for the target Actual Budget instance (e.g., `http://192.168.1.50:5006` for Sean, `http://192.168.1.50:5007` for Shelley).
-    *   **Sync ID**: The specific budget ID to sync with.
-    *   **Password**: The specific password for that file/server.
-*   **Schedule**: Set an independent cron schedule for this profile.
+### Sync profiles
 
-### 2. Category Management
-This feature allows you to define a standard set of Category Groups and Categories.
-*   **How it works**: When a Sync runs, the system checks if these Groups and Categories exist in your Actual Budget.
-*   **Additive Only**: If a category is missing, it is **created**. If a category already exists, it is left alone. The system **never deletes** categories from your budget.
-*   **How to Edit**:
-    1.  In Settings, find the **Global Category Mapping** section.
-    2.  Click **Edit** to reveal the JSON editor.
-    3.  The format is `"Group Name": ["Category 1", "Category 2"]`.
-    4.  Modify the list as needed and click **Save Configuration**.
+Each profile holds an independent sync configuration:
 
-**Example Structure:**
+- Click `+` to add a profile and give it a name (for example, "Sean's Investec").
+- Use the enabled toggle to pause syncing for a profile without deleting it.
+- Enter the Investec Client ID, Secret ID, and API Key, and use Test Connection to verify access.
+- Set the Actual Budget Server URL (for example, `http://192.168.1.50:5006` for Sean or `http://192.168.1.50:5007` for Shelley), Budget Sync ID, and optional password, then test the connection.
+- Optionally select an Actual AI Docker container and set a cron schedule for automated syncs.
+
+### Category management
+
+During a sync, the worker checks whether the configured category groups and categories exist in your Actual Budget. Missing ones are created and existing ones are left alone; the sync never deletes categories.
+
+To edit a profile's categories, open the Category Mapping section in Settings, click Edit JSON, update the `"Group Name": ["Category 1", "Category 2"]` structure, apply your changes, and save.
+
+Example structure:
+
 ```json
 {
   "🏠 Housing": [
@@ -174,41 +130,29 @@ This feature allows you to define a standard set of Category Groups and Categori
 }
 ```
 
-### 3. Git Repository Control
-*   **Host Project Path**: **(Important)** This is required for the "Update" and "Switch Branch" buttons to work.
-    *   Enter the absolute path to the project folder on your server (e.g., `/home/user/Investec-ActualBudget` or `/data/Investec-ActualBudget`).
-    *   *Why?* This lets the Docker container mount your source code at `/host-project` for self-updates while keeping the running app files isolated in the image.
-    *   **Tip:** To find this path on Linux, open your terminal in the project folder and run: `pwd`
-*   **Target Branch**: Select a branch (like `main` or `Dev`) and click **Switch & Rebuild**.
+### Git repository control
 
----
+Set the Host Project Path if you want to use the in-app Update or Switch Branch buttons. Enter the absolute path to this project folder on the host (for example, `/home/user/Investec-ActualBudget` or `/data/Investec-ActualBudget`; run `pwd` in the folder on Linux to get it). Docker mounts that path at `/host-project` for self-updates while keeping the running application files inside the image.
 
-## 🤖 Supercharge with Actual AI
+Use Target Branch to pick a branch (such as `main` or `Dev`) and switch or upgrade.
 
-To get the most out of your automated budget, we recommend pairing this Sync tool with **Actual AI**.
+## Using Actual AI
 
-While **Investec Sync** handles the reliable delivery of bank transactions into Actual, **Actual AI** uses Artificial Intelligence to automatically categorise those transactions, assign payees, and clean up descriptions.
+Investec Sync imports bank transactions into Actual Budget. If you also want automatic categorisation, payee assignment, and cleaned-up descriptions, you can pair it with [Actual AI](https://github.com/sakowicz/actual-ai). Once Investec Sync pushes new transactions into Actual, Actual AI picks them up and categorises them.
 
-*   **Get Actual AI here:** [https://github.com/sakowicz/actual-ai](https://github.com/sakowicz/actual-ai)
+## Docker network setup
 
-**The Ultimate Flow:**
-1.  **Investec Sync** -> Downloads transactions -> Pushes to Actual.
-2.  **Actual AI** -> Detects new transactions -> Categorises them automatically.
+By default, the compose file publishes port `46490` and maps `host.docker.internal` so the container can reach services on the Docker host. If you prefer to connect Actual Budget and Investec Sync over a shared Docker bridge network instead, follow the steps below.
 
----
+### 1. Create the network
 
-## Advanced: Docker Network Setup
-
-By default, this project publishes port `46490` and provides `host.docker.internal` for reaching host-side services. If you prefer to run it on a shared internal Docker network with Actual Budget, follow these steps:
-
-### 1. Create the Network
-Run this command to create a bridge network:
 ```bash
 docker network create actual_network
 ```
 
 ### 2. Update Actual Budget
-Modify the `docker-compose.yml` for your **Actual Budget** container to join this network:
+
+Add the network to your Actual Budget `docker-compose.yml`:
 
 ```yaml
 services:
@@ -224,9 +168,8 @@ networks:
 ```
 
 ### 3. Update Investec Sync
-Modify the `docker-compose.yml` in this folder (`Investec-ActualBudget`).
-1.  Keep the `ports` mapping if you still want to open the Investec Sync UI from the host.
-2.  **Add** the network configuration:
+
+Edit `docker-compose.yml` in `Investec-ActualBudget`. Keep the `ports` mapping if you still want to open the UI from the host, and attach the shared network:
 
 ```yaml
 services:
@@ -250,34 +193,31 @@ networks:
     external: true
 ```
 
-### 4. Update Settings Configuration
-In the Investec Sync Web UI settings:
-*   Change **Server URL** to: `http://actual_server:5006`
-*   *(Note: "actual_server" matches the `container_name` or service name defined in step 2)*.
+### 4. Update settings
 
----
+In the Investec Sync settings, set Server URL to `http://actual_server:5006`, where `actual_server` matches the `container_name` or service name from step 2.
 
 ## Troubleshooting
 
-### "Could not get remote files" / "Server cannot find budget file"
-This usually means your Sync ID is correct, but the file doesn't exist on the server yet.
-1.  Open Actual Budget in your browser.
-2.  Go to **File Menu > Close File**.
-3.  Look at the list of budgets.
-4.  If your budget says **"Local"**, you must upload it.
-    *   Select the file -> Manage -> **Upload to Server**.
-    *   If that option is missing: Open the file -> Settings -> Export -> Close File -> **Import File** (Choose "Actual"). This creates a fresh Remote copy.
+### "Could not get remote files" or "Server cannot find budget file"
 
-### "Fetch Failed" / Network Errors
-*   If Actual Budget runs on the Docker host, use `http://host.docker.internal:5006` for the Server URL.
-*   If Actual Budget runs on the same custom Docker network, use the Actual service name, for example `http://actual_server:5006`.
-*   From outside Docker, open this app at `http://localhost:46490`.
+Your Sync ID is valid, but the budget file has not been uploaded to the Actual server yet.
 
-### Docker Unavailable in Settings
-Ensure `.env` contains `DOCKER_GID` matching the host socket's group ID (`stat -c '%g' /var/run/docker.sock`), then recreate the service with `docker compose up -d --build --force-recreate`. Docker socket access gives the app broad control over the Docker host.
+1. Open Actual Budget in your browser.
+2. Go to File Menu > Close File.
+3. Check the list of budgets. If yours is marked "Local", select it, open Manage, and choose Upload to Server.
+4. If Upload to Server is missing, open the file, go to Settings > Export, close the file, and use Import File (choose "Actual") to create a remote copy.
 
-### Accounts Merging Incorrectly
-The system tries to match accounts by name.
-*   It prioritises your Investec **Reference Name** (Nickname).
-*   If that is missing or matches the account holder name, it uses **Product Name + Last 4 Digits**.
-*   To fix merging issues, give your accounts distinct nicknames in Investec Online Banking.
+### "Fetch Failed" or network errors
+
+- If Actual Budget runs on the Docker host, use `http://host.docker.internal:5006` as the Server URL.
+- If Actual Budget runs on the same custom Docker network, use its service name (for example, `http://actual_server:5006`).
+- From outside Docker, open this app at `http://localhost:46490`.
+
+### Docker unavailable in Settings
+
+Check that `.env` contains `DOCKER_GID` matching the host socket's group ID (`stat -c '%g' /var/run/docker.sock`), then recreate the service with `docker compose up -d --build --force-recreate`. Docker socket access gives the app broad control over the Docker host.
+
+### Accounts merging incorrectly
+
+The sync matches accounts by name. It checks your Investec Reference Name (nickname) first. If that is missing or matches the account holder name, it falls back to the product name plus the last four digits of the account number. To avoid collisions, give each account a distinct nickname in Investec Online Banking.

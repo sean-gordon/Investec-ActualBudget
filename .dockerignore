@@ -1,9 +1,20 @@
 node_modules
 dist
 data
+backup
 .git
 .github
-docs/agents/handoff
+docs/agents
+CLAUDE.md
+CLAUDE.local.md
+GEMINI.md
+AGENTS.md
+.agents
+.agent
+.claude
+.gemini
+.codex
+.cursor
 
 .env
 .env.*
@@ -14,3 +25,4 @@ yarn-error.log*
 
 .DS_Store
 Thumbs.db
+desktop.ini
