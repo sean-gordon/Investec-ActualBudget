@@ -1,3 +1,13 @@
+# Release 8.0.3: Reliable in-app self-updates and cleaner logs
+
+Fixed in-app updates causing 502 Bad Gateway errors when replacing the running container, preserved `data/` bind mounts during container-triggered rebuilds, and cleaned up proxy errors and container logs in the UI.
+
+- Changed `/api/update` and `/api/git/switch` to build the image first (`docker compose build`) and hand off `docker compose up -d --no-build --force-recreate` to a detached sibling container so stopping `investec-sync` no longer kills the updater mid-recreate.
+- Added auto-detection of the host project path from the `/host-project` Docker mount if Host Project Path is left blank, prevented overlapping update runs with a `409` lock, and increased `exec` `maxBuffer` to 10 MB for Docker builds.
+- Updated `docker-compose.yml` to mount `${HOST_DIR:-.}/data:/app/data` so container-triggered rebuilds always keep the real host `data/` folder.
+- Stripped ANSI colour escape sequences and duplicate timestamps from Actual AI container logs in the live console.
+- Replaced raw HTML 502/503/504 gateway error alerts with clear messages and synced the Update button's `Updating...` state with `/api/status`.
+
 # Release 8.0.2: UI fixes and Actual Budget backwards compatibility
 
 Resolved UI glitches, broken/unlinked settings controls, and Actual Budget budget-loading edge cases while preserving backwards compatibility with existing profiles and older Actual Budget configurations.

@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import cron from 'node-cron';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { fork, exec } from 'child_process';
@@ -557,6 +558,7 @@ const app = express();
 
 const processingProfiles = new Set(); // Track active profile IDs
 const activeSessions = new Set();
+let isMaintenanceRunning = false;
 let logs = [];
 const MAX_LOGS = 200;
 let cronTasks = {}; // { profileId: task }
@@ -819,6 +821,7 @@ app.get('/api/status', (req, res) => {
     res.json({
         processingProfiles: Array.from(processingProfiles),
         version: SCRIPT_VERSION,
+        isUpdating: isMaintenanceRunning,
         // Check if any profile has a budget loaded (just a loose check if any ID exists)
         profileCount: config.profiles.length
     });
@@ -1089,9 +1092,86 @@ app.get('/api/git/status', (req, res) => {
     })();
 });
 
+const EXEC_MAX_BUFFER = 10 * 1024 * 1024; // 10 MB for Docker build output
+
+const shellQuote = (value) => `'${String(value).replace(/'/g, `'\\''`)}'`;
+
+const detectHostProjectDir = () => new Promise((resolve) => {
+    const containerId = os.hostname();
+    if (!containerId || !/^[a-zA-Z0-9_.\-]+$/.test(containerId)) return resolve('');
+    exec(
+        `docker inspect --format '{{range .Mounts}}{{if eq .Destination "/host-project"}}{{.Source}}{{end}}{{end}}' ${containerId}`,
+        (err, stdout) => {
+            if (err || !stdout) return resolve('');
+            resolve(stdout.trim());
+        }
+    );
+});
+
+const rebuildAndRestartContainer = async (runCmd, hostDirEnv, logFn) => {
+    let effectiveHostDir = hostDirEnv.HOST_DIR || '';
+    if (!effectiveHostDir) {
+        effectiveHostDir = await detectHostProjectDir();
+        if (effectiveHostDir) {
+            logFn(`Auto-detected Host Project Path from container mount: ${effectiveHostDir}`);
+        }
+    }
+
+    const envWithHostDir = effectiveHostDir ? { ...hostDirEnv, HOST_DIR: effectiveHostDir } : hostDirEnv;
+
+    // 1. Build the new image first while the current container stays alive and responsive.
+    await runCmd('docker compose build', 'Docker Compose Build', envWithHostDir);
+
+    // 2. Recreate via a detached sibling container so stopping this container does not kill
+    //    the docker compose process mid-recreate (which otherwise leaves the service down / 502).
+    if (effectiveHostDir && fs.existsSync('/var/run/docker.sock')) {
+        const imagesOut = await runCmd('docker compose config --images', 'Resolve Built Image Name', envWithHostDir);
+        const imageName = imagesOut.split('\n').map(s => s.trim()).find(Boolean);
+        const sockGidOut = await runCmd("stat -c '%g' /var/run/docker.sock", 'Detect Docker Socket GID', envWithHostDir).catch(() => '');
+        const sockGid = sockGidOut.trim();
+
+        if (imageName) {
+            const quotedHostDir = shellQuote(effectiveHostDir);
+            const groupFlag = /^\d+$/.test(sockGid) ? `--group-add ${sockGid}` : '';
+            const helperName = `investec-updater-${Date.now()}`;
+            const innerScript = [
+                'sleep 2',
+                'docker compose up -d --no-build --force-recreate --remove-orphans',
+                'docker image prune -f || true'
+            ].join(' && ');
+            const helperCmd = [
+                'docker run --rm -d',
+                `--name ${helperName}`,
+                groupFlag,
+                '-v /var/run/docker.sock:/var/run/docker.sock',
+                `-v ${quotedHostDir}:${quotedHostDir}`,
+                `-w ${quotedHostDir}`,
+                `-e HOST_DIR=${quotedHostDir}`,
+                '--entrypoint sh',
+                shellQuote(imageName),
+                `-c ${shellQuote(`(${innerScript}) >> ${quotedHostDir}/data/update.log 2>&1`)}`
+            ].filter(Boolean).join(' ');
+
+            await runCmd(helperCmd, 'Launch Detached Updater Container', envWithHostDir);
+            return;
+        }
+    }
+
+    // Fallback when running directly on host (outside Docker)
+    await runCmd('docker compose up -d --no-build --force-recreate --remove-orphans', 'Docker Compose Up', envWithHostDir);
+    try {
+        await runCmd('docker image prune -f', 'Cleanup Old Images', envWithHostDir);
+    } catch (e) {
+        logFn(`Cleanup Warning: ${e.message}`);
+    }
+};
+
 app.post('/api/git/switch', (req, res) => {
     if (MAINTENANCE_ACTIONS_DISABLED) {
         return res.status(403).json({ error: 'Maintenance actions are disabled for this server process.' });
+    }
+    if (isMaintenanceRunning) {
+        return res.status(409).json({ error: 'An update or branch switch is already in progress.' });
     }
 
     const { branch } = req.body;
@@ -1106,15 +1186,28 @@ app.post('/api/git/switch', (req, res) => {
         return res.status(400).json({ error: hostDirError });
     }
 
+    isMaintenanceRunning = true;
     addLog(`System switching to branch: ${branch}...`, 'info');
+    logToFile(`=== Branch Switch Started (${branch}) ===`);
     res.json({ status: 'updating', message: `Switching to ${branch}. Service will restart.` });
     
     setTimeout(async () => {
-        const runSwitchCmd = (cmd, desc) => new Promise((resolve, reject) => {
-            exec(cmd, { cwd: PROJECT_ROOT, env: { ...process.env, ...hostDirEnv } }, (error, stdout, stderr) => {
-                if (stdout) console.log(`${desc}: ${stdout.trim()}`);
-                if (stderr) console.error(`${desc}: ${stderr.trim()}`);
-                if (error) return reject(error);
+        const runSwitchCmd = (cmd, desc, extraEnv = hostDirEnv) => new Promise((resolve, reject) => {
+            logToFile(`Running: ${desc} (${cmd})`);
+            exec(cmd, { cwd: PROJECT_ROOT, env: { ...process.env, ...extraEnv }, maxBuffer: EXEC_MAX_BUFFER }, (error, stdout, stderr) => {
+                if (stdout) {
+                    console.log(`${desc}: ${stdout.trim()}`);
+                    logToFile(`[STDOUT] ${stdout.trim()}`);
+                }
+                if (stderr) {
+                    console.error(`${desc}: ${stderr.trim()}`);
+                    logToFile(`[STDERR] ${stderr.trim()}`);
+                }
+                if (error) {
+                    logToFile(`FAILED: ${error.message}`);
+                    return reject(error);
+                }
+                logToFile(`SUCCESS: ${desc}`);
                 resolve(stdout);
             });
         });
@@ -1135,11 +1228,14 @@ app.post('/api/git/switch', (req, res) => {
 
             await runSwitchCmd(`git fetch origin ${branch} --tags --prune`, 'Fetch Target Branch');
             await runSwitchCmd(`git checkout -B ${branch} origin/${branch}`, 'Checkout Target Branch From Remote');
-            await runSwitchCmd('docker compose up -d --build', 'Docker Rebuild After Branch Switch');
-            addLog(`Branch switch completed: ${branch}`, 'success');
+            await rebuildAndRestartContainer(runSwitchCmd, hostDirEnv, logToFile);
+            addLog(`Branch switch staged: ${branch}. Restarting container...`, 'success');
+            logToFile(`=== Branch Switch Handoff Complete (${branch}) ===`);
         } catch (error) {
             console.error(`Switch error: ${error}`);
+            logToFile(`CRITICAL ERROR: Branch switch aborted. ${error.message}`);
             addLog(`Branch switch failed: ${error.message}`, 'error');
+            isMaintenanceRunning = false;
         }
     }, 1000);
 });
@@ -1199,6 +1295,9 @@ app.post('/api/update', (req, res) => {
     if (MAINTENANCE_ACTIONS_DISABLED) {
         return res.status(403).json({ error: 'Maintenance actions are disabled for this server process.' });
     }
+    if (isMaintenanceRunning) {
+        return res.status(409).json({ error: 'An update is already in progress.' });
+    }
 
     const config = loadConfig();
     const { hostDirEnv, hostDirError } = getHostDirEnv(config);
@@ -1206,17 +1305,14 @@ app.post('/api/update', (req, res) => {
         return res.status(400).json({ error: hostDirError });
     }
 
+    isMaintenanceRunning = true;
     addLog('System update initiated...', 'info');
     logToFile('=== Update Process Started ===');
     res.json({ status: 'updating', message: 'Update started. Check /api/debug/update-log for details. Service will restart shortly.' });
 
-    if (!hostDirEnv.HOST_DIR) {
-        logToFile("WARNING: 'Host Project Path' is not set. Docker bind mounts might fail if not running in development.");
-    }
-
-    const runCmd = (cmd, desc) => new Promise((resolve, reject) => {
+    const runCmd = (cmd, desc, extraEnv = hostDirEnv) => new Promise((resolve, reject) => {
         logToFile(`Running: ${desc} (${cmd})`);
-        exec(cmd, { cwd: PROJECT_ROOT, env: { ...process.env, ...hostDirEnv } }, (error, stdout, stderr) => {
+        exec(cmd, { cwd: PROJECT_ROOT, env: { ...process.env, ...extraEnv }, maxBuffer: EXEC_MAX_BUFFER }, (error, stdout, stderr) => {
             if (stdout) logToFile(`[STDOUT] ${stdout.trim()}`);
             if (stderr) logToFile(`[STDERR] ${stderr.trim()}`);
             
@@ -1275,25 +1371,17 @@ app.post('/api/update', (req, res) => {
             // 2. Git Update
             await runGitUpdate();
 
-            // 3. Update Container (Build + Up + Force Recreate + Remove Orphans)
-            // This single command is safer and more robust than splitting them.
-            // It ensures the running container is replaced by the newly built image.
-            const composeCmd = `${hostDirEnv.HOST_DIR ? 'HOST_DIR="$HOST_DIR" ' : ''}docker compose up -d --build --force-recreate --remove-orphans`;
-            await runCmd(composeCmd, 'Docker Build & Up');
+            // 3. Build new image and hand off recreate to a detached sibling container
+            await rebuildAndRestartContainer(runCmd, hostDirEnv, logToFile);
 
-            // 4. Prune old images to save space
-            try {
-                 await runCmd('docker image prune -f', 'Cleanup Old Images');
-            } catch (e) {
-                logToFile(`Cleanup Warning: ${e.message}`);
-            }
-
-            logToFile('=== Update Process Completed Successfully ===');
+            addLog('Build complete. Restarting container into new version...', 'success');
+            logToFile('=== Update Handoff Complete (Container Restarting) ===');
             
         } catch (e) {
             console.error(`Update Error: ${e.message}`);
             logToFile(`CRITICAL ERROR: Update aborted. ${e.message}`);
             addLog(`Update failed: ${e.message}`, 'error');
+            isMaintenanceRunning = false;
         }
     }, 1000);
 });

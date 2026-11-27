@@ -49,8 +49,20 @@ export default function App() {
       throw new Error('Unauthorized');
     }
     if (!res.ok) {
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const errJson = await res.json().catch(() => null);
+        throw new Error(errJson?.error || `API Error ${res.status}`);
+      }
       const text = await res.text().catch(() => 'No error details');
-      throw new Error(`API Error ${res.status}: ${text.substring(0, 100)}`);
+      const isHtml = contentType.includes('text/html') || /^\s*<!doctype html|^\s*<html/i.test(text);
+      if (isHtml && [502, 503, 504].includes(res.status)) {
+        throw new Error(`Server is temporarily unreachable (HTTP ${res.status}). If an update or restart is in progress, wait a moment and reload.`);
+      }
+      if (isHtml) {
+        throw new Error(`Server returned HTTP ${res.status}.`);
+      }
+      throw new Error(`API Error ${res.status}: ${text.substring(0, 120)}`);
     }
     const contentType = res.headers.get('content-type');
     if (contentType && contentType.includes('application/json')) {
@@ -173,6 +185,9 @@ export default function App() {
         setIsConnected(true);
         setProcessingProfiles(statusData.processingProfiles || []);
         setServerVersion(statusData.version);
+        if (typeof statusData.isUpdating === 'boolean') {
+          setIsUpdating(statusData.isUpdating);
+        }
 
         if (logViewMode === 'live') {
             const logsData = await fetchJson(`${API_BASE}/logs`);
@@ -283,6 +298,11 @@ export default function App() {
                     message = parts.slice(1).join(' '); // Remainder is message
                 }
             }
+
+            // Strip ANSI escape codes from container output
+            message = message.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+            // Strip duplicate leading ISO timestamp if the app logs its own timestamp after Docker's
+            message = message.replace(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\s+/, '');
 
             parsedAiLogs.push({
                 timestamp,
@@ -454,18 +474,17 @@ export default function App() {
                 setIsUpdating(true);
                 try {
                   await fetchJson(`${API_BASE}/update`, { method: 'POST' });
-                  alert("Update started! Reload in 10s.");
-                  setTimeout(() => window.location.reload(), 10000);
+                  alert("Update started. Docker is building the new image and will restart automatically (typically 30-60 seconds). Check Update History logs for progress.");
                 } catch (e) {
                   setIsUpdating(false);
                   alert(`Failed to start update: ${(e as Error).message}`);
                 }
               }}
               disabled={isUpdating}
-              className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-full animate-pulse"
+              className={`flex items-center gap-2 px-3 py-1.5 text-white text-sm font-semibold rounded-full ${isUpdating ? 'bg-blue-800 cursor-not-allowed opacity-75' : 'bg-blue-600 hover:bg-blue-500 animate-pulse'}`}
             >
               <Download size={14} />
-              Update
+              {isUpdating ? 'Updating...' : 'Update'}
             </button>
           )}
           <a
