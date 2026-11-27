@@ -1,3 +1,13 @@
+# Release 8.0.0: Improve speed and cleanup
+
+Trimmed unused packages, dead code, and non-solution files across the repository for faster installs, cleaner Docker builds, and a smaller codebase.
+
+- Removed unused dependencies (`@types/uuid`, direct `body-parser`, `autoprefixer`, `postcss`, and `tailwindcss`) and switched the Express server to built-in `express.json()`.
+- Removed dead files and AI/audit artefacts (`env.sh`, `metadata.json`, `nginx.conf`, `public/env-config.js`, `AGENTS.md`, `feature_status.csv`, `scripts/verify-static.mjs`, and `.github/` Gemini workflow/command files).
+- Cleaned up unused code across `index.html`, `types.ts`, `server.js`, `App.tsx`, and `components/SettingsForm.tsx`.
+- Updated `.gitignore` and `.dockerignore` to exclude local AI/agent files and runtime data cleanly.
+- Rewrote `README.md` for clarity and up-to-date setup instructions.
+
 # Release 7.0.2: Actual API 26.9.0
 
 Updated `@actual-app/api` to the latest stable version, `26.9.0`, and pinned it for consistent installs. The app now checks that your budget opens before reporting a successful connection, with a clearer error if it cannot load.
