@@ -96,7 +96,7 @@ const stopServer = async () => {
 const waitForServer = async () => {
   for (let i = 0; i < startupAttempts; i++) {
     try {
-      const res = await fetch(`${baseUrl}/env-config.js`);
+      const res = await fetch(`${baseUrl}/`);
       if (res.ok) return;
     } catch {
       // Server is still starting.
@@ -120,12 +120,6 @@ const expectStatus = async (path, options, status) => {
 
 try {
   await waitForServer();
-
-  const envScript = await expectStatus('/env-config.js', {}, 200);
-  const envText = await envScript.text();
-  if (!envText.includes('window.__ENV__')) {
-    throw new Error('/env-config.js did not return the runtime env script');
-  }
 
   const spaRes = await expectStatus('/profiles/deep-link', {}, 200);
   const spaText = await spaRes.text();

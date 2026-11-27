@@ -1258,10 +1258,6 @@ app.post('/api/update', (req, res) => {
 const initialConfig = loadConfig();
 setupCron(initialConfig);
 
-app.get('/env-config.js', (req, res) => {
-    res.type('application/javascript').send('window.__ENV__ = window.__ENV__ || {};');
-});
-
 app.use(express.static(DIST_DIR));
 app.get('*', (req, res) => {
     const p = path.join(DIST_DIR, 'index.html');
