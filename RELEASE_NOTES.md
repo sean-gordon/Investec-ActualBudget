@@ -1,3 +1,11 @@
+# Release 8.0.1: Actual API 26.11.0 and Node 22
+
+Updated `@actual-app/api` from `26.9.0` to `26.11.0` and upgraded the Docker base image to `node:22-trixie-slim` to resolve budget open/migration errors against newer Actual Budget servers (`No budget file is open`).
+
+- Bumped `@actual-app/api` to `26.11.0` (matches current Actual Budget server schema migrations).
+- Upgraded `Dockerfile` builder and runtime stages to `node:22-trixie-slim` (required by `@actual-app/api` 26.11.0).
+- Included both the remote Actual server version and the local `@actual-app/api` version in budget-open error messages to make future version mismatches obvious.
+
 # Release 8.0.0: Improve speed and cleanup
 
 Trimmed unused packages, dead code, and non-solution files across the repository for faster installs, cleaner Docker builds, and a smaller codebase.

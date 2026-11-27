@@ -1,7 +1,7 @@
 {
   "name": "investec-actual-sync",
   "private": true,
-  "version": "8.0.0",
+  "version": "8.0.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,7 +11,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@actual-app/api": "26.9.0",
+    "@actual-app/api": "26.11.0",
     "cors": "^2.8.5",
     "express": "^4.21.0",
     "lucide-react": "^0.470.0",

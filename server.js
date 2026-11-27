@@ -62,6 +62,15 @@ const SCRIPT_VERSION = (() => {
     }
 })();
 
+const ACTUAL_API_VERSION = (() => {
+    try {
+        const pkg = JSON.parse(fs.readFileSync(PACKAGE_FILE, 'utf-8'));
+        return pkg.dependencies?.['@actual-app/api'] || 'unknown';
+    } catch (e) {
+        return 'unknown';
+    }
+})();
+
 // --- SECURITY CONFIG ---
 const MASTER_PASSWORD = process.env.APP_PASSWORD || 'investec-sync-default'; // Default for local use, should be changed
 
@@ -343,9 +352,12 @@ if (process.env.WORKER_ACTION) {
                 logP(`Config: URL=${serverUrl} | ID=${budgetId.substring(0,8)}... | Pass=${maskedPass}`, 'info');
 
                 logP(`Network Check: ${serverUrl}/info...`, 'info');
+                let remoteActualVersion = 'unknown';
                 try {
                     const infoRes = await fetch(`${serverUrl}/info`);
                     if (!infoRes.ok) throw new Error(`Status ${infoRes.status}`);
+                    const infoData = await infoRes.json().catch(() => null);
+                    remoteActualVersion = infoData?.build?.version || infoData?.version || 'unknown';
                 } catch (err) {
                     throw new Error(`Network Error: Cannot reach ${serverUrl}. Details: ${err.message}`);
                 }
@@ -392,7 +404,7 @@ if (process.env.WORKER_ACTION) {
                 try {
                     await actual.getAccounts();
                 } catch (loadErr) {
-                    throw new Error(`Actual budget could not be opened: ${loadErr.message}. Ensure the Actual API version supports your server and budget version; check container logs for migration errors.`);
+                    throw new Error(`Actual budget could not be opened: ${loadErr.message} (Server: ${remoteActualVersion}, @actual-app/api: ${ACTUAL_API_VERSION}). Check container logs for migration errors.`);
                 }
 
                 if (action === 'test-actual') {
